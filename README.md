@@ -18,7 +18,7 @@ TypeScript 全栈，用 Workers + Durable Objects 搭建出海游戏后端。
 | 章 | 标题 | 状态 |
 |---|---|---|
 | 1 | [为什么用 Cloudflare 做游戏后端](book/01-why-cloudflare.md) | 初稿 |
-| 2 | [工程搭建](book/02-project-setup.md) | 未开始 |
+| 2 | [工程搭建](book/02-project-setup.md) | 初稿 |
 | 3 | [存储选型](book/03-storage.md) | 未开始 |
 
 ### 第二部分：核心系统

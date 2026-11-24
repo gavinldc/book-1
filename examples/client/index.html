@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>联调客户端</title>
+    <style>
+      body { font: 15px/1.5 system-ui, sans-serif; max-width: 560px; margin: 24px auto; padding: 0 16px; }
+      input, button { font: inherit; padding: 6px 10px; }
+      input { width: 110px; }
+      pre { background: #f4f4f4; padding: 12px; overflow: auto; min-height: 120px; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+      #error { color: #b00020; min-height: 1.5em; }
+    </style>
+  </head>
+  <body>
+    <h1>联调客户端</h1>
+    <p>只用来验证协议，书里不讲解。开两个浏览器窗口，用同一个房间号、不同的玩家 ID 连接。</p>
+    <div class="row">
+      <input id="room" value="demo" aria-label="房间号" />
+      <input id="player" aria-label="玩家 ID" />
+      <button id="connect">连接</button>
+    </div>
+    <div class="row">
+      <button id="ready" disabled>准备</button>
+      <button id="roll" disabled>掷骰子</button>
+    </div>
+    <div id="error"></div>
+    <pre id="state">未连接</pre>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      $("player").value = "p" + Math.floor(Math.random() * 1000);
+      let ws = null;
+
+      function send(type) {
+        ws.send(JSON.stringify({ type }));
+      }
+
+      $("connect").onclick = () => {
+        if (ws) ws.close();
+        const scheme = location.protocol === "https:" ? "wss" : "ws";
+        const room = encodeURIComponent($("room").value);
+        const player = encodeURIComponent($("player").value);
+        ws = new WebSocket(`${scheme}://${location.host}/room/${room}/ws?player=${player}`);
+        ws.onopen = () => {
+          $("ready").disabled = $("roll").disabled = false;
+          $("error").textContent = "";
+        };
+        ws.onclose = () => {
+          $("ready").disabled = $("roll").disabled = true;
+          $("state").textContent = "连接已断开";
+        };
+        ws.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+          if (message.type === "state") {
+            $("error").textContent = "";
+            $("state").textContent = JSON.stringify(message.state, null, 2);
+          } else {
+            $("error").textContent = "错误：" + message.code;
+          }
+        };
+      };
+      $("ready").onclick = () => send("ready");
+      $("roll").onclick = () => send("roll");
+    </script>
+  </body>
+</html>

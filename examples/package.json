@@ -1,0 +1,15 @@
+{
+  "name": "cf-game-backend-example",
+  "private": true,
+  "type": "module",
+  "workspaces": ["shared", "server"],
+  "scripts": {
+    "dev": "npm run dev -w server",
+    "test": "npm test -w shared && npm test -w server",
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w server"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.0"
+  }
+}

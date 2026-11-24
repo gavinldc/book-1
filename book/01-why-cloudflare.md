@@ -66,8 +66,7 @@ export class Room extends DurableObject<Env> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const roomId = new URL(request.url).searchParams.get("room") ?? "lobby";
-    const stub = env.ROOM.get(env.ROOM.idFromName(roomId));
-    return stub.fetch(request);
+    return env.ROOM.getByName(roomId).fetch(request);
   },
 };
 ```
@@ -325,4 +324,4 @@ Vibe coding 省掉的是写代码的时间，省不掉的是设计上的判断�
 - DO 时长固定按 128 MB 计费，与实际内存占用无关。
 - 对象空闲多久后进入休眠。文档只说"一小段时间"。
 
-另有两点文档没有写明：AI Gateway 标注为所有套餐可用，但没有说明各项功能是否免费；Vectorize 在免费版是否可用，产品首页没有说明。1.6 节里的应对方案（频道对象、排行榜分片、按地区匹配等）是作者给出的设计方向，文档只提供了其中的限额和机制；单个对象能挂多少连接，文档只说"数千"，没有给出确切上限。1.8 节里关于 vibe coding 的理由和约定是作者的判断，不是来自文档；其中提到的 wrangler 命令本轮没有逐条核对，将在第 2 章搭建工程时实际跑通。
+另有两点文档没有写明：AI Gateway 标注为所有套餐可用，但没有说明各项功能是否免费；Vectorize 在免费版是否可用，产品首页没有说明。1.6 节里的应对方案（频道对象、排行榜分片、按地区匹配等）是作者给出的设计方向，文档只提供了其中的限额和机制；单个对象能挂多少连接，文档只说"数千"，没有给出确切上限。1.8 节里关于 vibe coding 的理由和约定是作者的判断，不是来自文档；其中的 `wrangler dev`、`wrangler types` 和 `vitest` 已在第 2 章的示例项目里实际运行过，`wrangler deploy`、`wrangler tail`、`wrangler rollback` 需要账号，只核对了文档。1.3 节的最小房间代码与第 2 章示例项目的写法一致，后者已通过测试。
