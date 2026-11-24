@@ -9,6 +9,16 @@ import {
 } from "@game/shared";
 
 const STATE_KEY = "state";
+const PENDING_KEY = "pending_settlement";
+
+const WIN_COINS = 10;
+const RETRY_DELAY_MS = 5_000;
+
+/** 一局结束后要发给各个玩家对象的结算内容。发放成功之前一直保存在存储里。 */
+interface PendingSettlement {
+  matchId: string;
+  results: { playerId: string; won: boolean; coins: number }[];
+}
 
 interface Attachment {
   playerId: string;
@@ -19,6 +29,12 @@ interface Attachment {
  * 游戏规则全部在 @game/shared 里。
  */
 export class Room extends DurableObject<Env> {
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // 心跳由平台直接应答，不会唤醒对象。
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+  }
+
   async fetch(request: Request): Promise<Response> {
     const playerId = new URL(request.url).searchParams.get("player")!;
 
@@ -52,13 +68,15 @@ export class Room extends DurableObject<Env> {
     const action: Action =
       message.type === "roll" ? { type: "roll", playerId, dice: rollDice() } : { type: "ready", playerId };
 
-    const result = applyAction(await this.load(), action);
+    const before = await this.load();
+    const result = applyAction(before, action);
     if (!result.ok) {
       this.send(ws, { type: "error", code: result.error });
       return;
     }
-    await this.save(result.state);
+    await this.commit(before, result.state);
     this.broadcast({ type: "state", state: result.state });
+    await this.settle();
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
@@ -69,10 +87,58 @@ export class Room extends DurableObject<Env> {
       .some((other) => other !== ws && (other.deserializeAttachment() as Attachment).playerId === playerId);
     if (stillConnected) return;
 
-    const result = applyAction(await this.load(), { type: "leave", playerId });
+    const before = await this.load();
+    const result = applyAction(before, { type: "leave", playerId });
     if (!result.ok) return;
-    await this.save(result.state);
+    await this.commit(before, result.state);
     this.broadcast({ type: "state", state: result.state }, ws);
+    await this.settle();
+  }
+
+  /** 结算没发完时由定时器再试一次。 */
+  async alarm(): Promise<void> {
+    await this.settle();
+  }
+
+  /**
+   * 保存新状态。如果这一步让对局结束，把待结算记录和状态一起写入，
+   * 两者要么都成功，要么都不成功。
+   */
+  private async commit(before: RoomState, after: RoomState): Promise<void> {
+    if (before.phase === "playing" && after.phase === "finished") {
+      const pending: PendingSettlement = {
+        matchId: crypto.randomUUID(),
+        results: after.players.map((p) => ({
+          playerId: p.id,
+          won: p.id === after.winner,
+          coins: p.id === after.winner ? WIN_COINS : 0,
+        })),
+      };
+      await this.ctx.storage.put({ [STATE_KEY]: after, [PENDING_KEY]: pending });
+      return;
+    }
+    await this.save(after);
+  }
+
+  /**
+   * 把待结算记录发给各个玩家对象。玩家对象按 matchId 去重，所以这里可以重复执行。
+   * 任何一步失败都保留记录，稍后由定时器重试。
+   */
+  private async settle(): Promise<void> {
+    const pending = await this.ctx.storage.get<PendingSettlement>(PENDING_KEY);
+    if (!pending) return;
+    try {
+      for (const r of pending.results) {
+        await this.env.PLAYER.getByName(r.playerId).applyMatchResult(pending.matchId, {
+          won: r.won,
+          coins: r.coins,
+        });
+      }
+      await this.ctx.storage.delete(PENDING_KEY);
+    } catch (error) {
+      console.error("结算失败，稍后重试", pending.matchId, error);
+      await this.ctx.storage.setAlarm(Date.now() + RETRY_DELAY_MS);
+    }
   }
 
   /** 对象休眠后内存会清空，所以每次都从存储读取。 */

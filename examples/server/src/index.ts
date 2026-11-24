@@ -1,7 +1,9 @@
+export { Player } from "./player";
 export { Room } from "./room";
 
 const ROOM_WS = /^\/room\/([A-Za-z0-9_-]{1,32})\/ws$/;
 const PLAYER_ID = /^[A-Za-z0-9_-]{1,32}$/;
+const PLAYER_PROFILE = /^\/player\/([A-Za-z0-9_-]{1,32})$/;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -9,6 +11,12 @@ export default {
 
     if (url.pathname === "/health") {
       return Response.json({ ok: true, environment: env.ENVIRONMENT });
+    }
+
+    const profile = PLAYER_PROFILE.exec(url.pathname);
+    if (profile) {
+      // 通过 RPC 直接调用玩家对象上的方法。
+      return Response.json(await env.PLAYER.getByName(profile[1]!).getProfile());
     }
 
     const match = ROOM_WS.exec(url.pathname);

@@ -1,4 +1,4 @@
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import type { ServerMessage } from "@game/shared";
 
@@ -87,11 +87,72 @@ describe("房间", () => {
     a.ws.close();
   });
 
+  it("心跳由平台自动应答", async () => {
+    const response = await exports.default.fetch(
+      new Request(`${BASE}/room/r-ping/ws?player=a`, { headers: { Upgrade: "websocket" } }),
+    );
+    const ws = response.webSocket!;
+    const messages: string[] = [];
+    ws.addEventListener("message", (event) => messages.push(event.data as string));
+    ws.accept();
+    ws.send("ping");
+    await expect.poll(() => messages).toContain("pong");
+    ws.close();
+  });
+
   it("不同房间互不影响", async () => {
     const a = await connect("r3", "a");
     const first = await a.next();
     if (first.type !== "state") throw new Error("应该收到状态");
     expect(first.state.players).toHaveLength(1);
     a.ws.close();
+  });
+});
+
+describe("玩家数据与结算", () => {
+  it("新玩家的初始数据", async () => {
+    const response = await exports.default.fetch(new Request(`${BASE}/player/newbie`));
+    expect(await response.json()).toEqual({ coins: 0, wins: 0, games: 0 });
+  });
+
+  it("同一局的结果重复提交只生效一次", async () => {
+    const player = env.PLAYER.getByName("idem");
+    await player.applyMatchResult("m1", { won: true, coins: 10 });
+    await player.applyMatchResult("m1", { won: true, coins: 10 });
+    expect(await player.getProfile()).toEqual({ coins: 10, wins: 1, games: 1 });
+
+    await player.applyMatchResult("m2", { won: false, coins: 0 });
+    expect(await player.getProfile()).toEqual({ coins: 10, wins: 1, games: 2 });
+  });
+
+  it("对局结束后双方的数据都被更新", async () => {
+    const a = await connect("settle", "sa");
+    await a.next();
+    const b = await connect("settle", "sb");
+    await a.next();
+    await b.next();
+    a.ws.send(JSON.stringify({ type: "ready" }));
+    await a.next();
+    await b.next();
+    b.ws.send(JSON.stringify({ type: "ready" }));
+    let message = await a.next();
+    await b.next();
+
+    // 轮流掷骰子直到有人到达终点。
+    const sockets = [a, b];
+    while (message.type === "state" && message.state.phase === "playing") {
+      sockets[message.state.turn]!.ws.send(JSON.stringify({ type: "roll" }));
+      message = await a.next();
+      await b.next();
+    }
+    if (message.type !== "state") throw new Error("应该收到状态");
+    const winner = message.state.winner!;
+    const loser = winner === "sa" ? "sb" : "sa";
+
+    await expect.poll(() => env.PLAYER.getByName(winner).getProfile()).toEqual({ coins: 10, wins: 1, games: 1 });
+    await expect.poll(() => env.PLAYER.getByName(loser).getProfile()).toEqual({ coins: 0, wins: 0, games: 1 });
+
+    a.ws.close();
+    b.ws.close();
   });
 });

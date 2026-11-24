@@ -4,12 +4,16 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
 
-  // 房间对象：绑定名 ROOM，对应 src/room.ts 里导出的 Room 类，使用 SQLite 存储。
+  // 房间对象和玩家对象，都使用 SQLite 存储。
   "durable_objects": {
-    "bindings": [{ "name": "ROOM", "class_name": "Room" }]
+    "bindings": [
+      { "name": "ROOM", "class_name": "Room" },
+      { "name": "PLAYER", "class_name": "Player" }
+    ]
   },
   "exports": {
-    "Room": { "type": "durable-object", "storage": "sqlite" }
+    "Room": { "type": "durable-object", "storage": "sqlite" },
+    "Player": { "type": "durable-object", "storage": "sqlite" }
   },
 
   // 联调用的最小客户端，作为静态资源一起发布。
@@ -24,7 +28,10 @@
       "name": "game-backend-example-staging",
       // 绑定和变量不会被环境继承，必须在每个环境里重新声明。
       "durable_objects": {
-        "bindings": [{ "name": "ROOM", "class_name": "Room" }]
+        "bindings": [
+          { "name": "ROOM", "class_name": "Room" },
+          { "name": "PLAYER", "class_name": "Player" }
+        ]
       },
       "vars": { "ENVIRONMENT": "staging" }
     }
