@@ -7,6 +7,8 @@
 - D1、KV、R2、Durable Objects 的限制与适用场景
 - 玩家存档放哪里
 - 一致性与事务边界
+- 数据怎么分布：玩家数据放各自的对象，D1 只放跨玩家查询的数据
+- D1 超过 10 GB 之后：拆库、冷数据归档到 R2、通过 Hyperdrive 外接 Postgres 或 MySQL
 
 ## 正文
 
