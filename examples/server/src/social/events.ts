@@ -1,3 +1,4 @@
+import { savePayment } from "../economy/reconcile";
 import { saveScores } from "./leaderboard";
 
 /**
@@ -12,6 +13,20 @@ export type PlayerEvent = { seq: number } & (
   | { type: "friend_remove"; from: string; to: string; at: number }
   | { type: "invited"; inviter: string; invitee: string; at: number }
   | { type: "invite_reward"; inviter: string; invitee: string; at: number }
+  | {
+      type: "payment";
+      playerId: string;
+      orderId: string;
+      productId: string;
+      provider: string;
+      amount: number;
+      currency: string;
+      status: "paid" | "refunded";
+      externalId: string | null;
+      /** 付款成功的时间。退款时仍然是原来那次付款的时间。 */
+      paidAt: number;
+      at: number;
+    }
 );
 
 /** 玩家对象写进发件箱的内容。序号在送出时才加上。 */
@@ -65,6 +80,9 @@ async function handleOne(event: PlayerEvent, env: Env): Promise<void> {
       return;
     case "friend_remove":
       await env.PLAYER.getByName(event.to).friendRemoved(event.from);
+      return;
+    case "payment":
+      await savePayment(env.DB, event);
       return;
     case "invited":
       await env.DB.prepare("INSERT OR IGNORE INTO invite (invitee, inviter, created_at) VALUES (?, ?, ?)")

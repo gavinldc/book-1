@@ -1,3 +1,8 @@
 # 复制为 .dev.vars 后使用。这里的值只用于本地开发和测试，不要用在线上。
 SESSION_SECRET="local-dev-only-session-secret-0123456789"
 TELEGRAM_BOT_TOKEN="123456:local-dev-only-fake-bot-token"
+# 设置 Telegram 回调地址时指定的密钥，只能用字母、数字、下划线和连字符。
+TELEGRAM_WEBHOOK_SECRET="local-dev-only-telegram-webhook-secret"
+# Stripe 的测试密钥和回调签名密钥。本地不真的发起支付时，填任意值即可。
+STRIPE_SECRET_KEY="sk_test_local_dev_only"
+STRIPE_WEBHOOK_SECRET="whsec_local_dev_only"

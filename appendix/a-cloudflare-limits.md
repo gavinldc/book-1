@@ -264,6 +264,24 @@
 
 文档：[D1 定价](https://developers.cloudflare.com/d1/platform/pricing/)、[D1 限额](https://developers.cloudflare.com/d1/platform/limits/)、[D1 读副本](https://developers.cloudflare.com/d1/best-practices/read-replication/)、[缓存接口](https://developers.cloudflare.com/workers/runtime-apis/cache/)、[KV 写入](https://developers.cloudflare.com/kv/api/write-key-value-pairs/)、[对象 ID](https://developers.cloudflare.com/durable-objects/api/id/)、[队列的 JavaScript 接口](https://developers.cloudflare.com/queues/configuration/javascript-apis/)、[Telegram 小程序](https://core.telegram.org/bots/webapps)
 
+## 第三方：支付与广告平台
+
+核实日期：2026-11-24。这一节不是 Cloudflare 的限额，是第 8 章用到的外部平台的规则。
+
+- Telegram：数字商品必须用 Stars 结算，币种代码 `XTR`，`provider_token` 传空字符串。
+- Telegram：`createInvoiceLink` 的 `payload` 为 1 到 128 字节，`title` 1 到 32 个字符，`description` 1 到 255 个字符。
+- Telegram：付款前的确认（`pre_checkout_query`）必须在 10 秒内答复；只有收到 `successful_payment` 才能发货。
+- Telegram：回调密钥（`secret_token`）1 到 256 个字符，只能用字母、数字、下划线和连字符，请求头是 `X-Telegram-Bot-Api-Secret-Token`。
+- Telegram：回调返回非 2xx 时会重发，尝试若干次后放弃；可以在回调的应答正文里直接调用一个 Bot API 方法，但无法得知调用结果。
+- Telegram：退款用 `refundStarPayment`，需要 `telegram_payment_charge_id`；`getStarTransactions` 里的交易编号和它一致；机器人必须响应 `/paysupport`。
+- Stripe：签名在 `Stripe-Signature` 请求头里，格式 `t=时间戳,v1=签名`，签名是对 `时间戳.请求体原文` 做的 HMAC-SHA256；官方库默认允许 5 分钟的时间差；轮换密钥期间可能有多个 `v1`。
+- Stripe：正式环境投递失败最长重试三天；同一事件可能重复投递；不保证事件的顺序。
+- Stripe：幂等键最长 255 个字符，至少保留 24 小时；v1 接口所有 POST 请求都接受。
+- Stripe：附加数据不会自动复制到关联对象；例外之一是付款意向的附加数据在创建扣款记录时复制过去（一次性快照）；结账会话可以用 `payment_intent_data.metadata` 给付款意向设置附加数据。
+- AdMob：服务端校验回调是 GET 请求，最后两个参数依次是 `signature` 和 `key_id`，被签名的内容是它们之前的查询串；签名是 ECDSA（SHA-256，DER 编码）；公钥地址 `https://www.gstatic.com/admob/reward/verifier-keys.json`，缓存不应超过 24 小时，公钥会定期轮换。
+
+文档：[Telegram Bot API](https://core.telegram.org/bots/api)、[Telegram Stars 支付](https://core.telegram.org/bots/payments-stars)、[Stripe 回调](https://docs.stripe.com/webhooks)、[Stripe 幂等请求](https://docs.stripe.com/api/idempotent_requests)、[Stripe 附加数据](https://docs.stripe.com/metadata)、[AdMob 服务端校验](https://developers.google.com/admob/android/ssv)
+
 ## 第三方：Ably
 
 核实日期：2026-11-24。这一节不是 Cloudflare 的限额，放在这里是因为 5.11 节把它作为全局广播的备选方案。

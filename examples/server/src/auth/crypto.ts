@@ -46,3 +46,13 @@ export async function hmacVerify(secret: string | Uint8Array, data: string, sign
   const key = await hmacKey(secret, "verify");
   return crypto.subtle.verify("HMAC", key, signature, encoder.encode(data));
 }
+
+/** 比较两个字符串是否相等，耗时不随内容变化。用于比较密钥这类不能被逐位试出来的值。 */
+export async function safeEqual(a: string, b: string): Promise<boolean> {
+  // 先各自做一次哈希，得到等长的两段数据，再交给平台比较。
+  const [x, y] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(a)),
+    crypto.subtle.digest("SHA-256", encoder.encode(b)),
+  ]);
+  return crypto.subtle.timingSafeEqual(x, y);
+}

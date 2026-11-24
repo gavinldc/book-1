@@ -29,7 +29,7 @@ TypeScript 全栈，用 Workers + Durable Objects 搭建出海游戏后端。
 | 5 | [房间与实时对战](book/05-rooms-realtime.md) | 初稿 |
 | 6 | [匹配与异步 PVP](book/06-matchmaking-async-pvp.md) | 初稿 |
 | 7 | [排行榜与社交](book/07-leaderboard-social.md) | 初稿 |
-| 8 | [经济系统与支付](book/08-economy-payments.md) | 未开始 |
+| 8 | [经济系统与支付](book/08-economy-payments.md) | 初稿 |
 
 ### 第三部分：运营与上线
 

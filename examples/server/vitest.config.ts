@@ -15,6 +15,9 @@ export default defineConfig({
             // 测试用的密钥直接写在这里，不依赖本机的 .dev.vars，CI 上也能跑。
             SESSION_SECRET: "test-only-session-secret",
             TELEGRAM_BOT_TOKEN: "123456:test-only-bot-token",
+            TELEGRAM_WEBHOOK_SECRET: "test-only-telegram-webhook-secret",
+            STRIPE_SECRET_KEY: "sk_test_only",
+            STRIPE_WEBHOOK_SECRET: "whsec_test_only",
             TEST_MIGRATIONS: migrations,
           },
         },
@@ -23,5 +26,7 @@ export default defineConfig({
   ],
   test: {
     setupFiles: ["./test/apply-migrations.ts"],
+    // 经过队列的变化要等一两秒才能看到，轮询的默认时限（1 秒）不够。
+    expect: { poll: { timeout: 5_000 } },
   },
 });

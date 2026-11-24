@@ -1,6 +1,7 @@
 import { authenticate, fail, handleAuth, json } from "./auth/routes";
 import { authenticateWebSocket, PLAYER_HEADER } from "./auth/websocket";
 import { saveRecords, type MatchRecord } from "./match/record";
+import { handleEconomy } from "./economy/routes";
 import { handleMatch } from "./match/routes";
 import { handlePlayerEvents, type PlayerEvent } from "./social/events";
 import { handleSocial } from "./social/routes";
@@ -39,6 +40,9 @@ export default {
 
     const social = await handleSocial(request, env, url.pathname);
     if (social) return social;
+
+    const economy = await handleEconomy(request, env, url);
+    if (economy) return economy;
 
     const match = ROOM_WS.exec(url.pathname);
     if (match) {

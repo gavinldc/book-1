@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
+import { negate, PRODUCTS, type Delta, type Provider } from "./economy/catalog";
 import type { PlayerEvent, PlayerEventDraft } from "./social/events";
 
 export interface Profile {
@@ -62,7 +63,76 @@ const MIGRATIONS: string[] = [
    ALTER TABLE profile ADD COLUMN inviter TEXT;
    ALTER TABLE profile ADD COLUMN invite_rewarded INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE profile ADD COLUMN invites_paid INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE profile ADD COLUMN gems INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE profile ADD COLUMN base_coins INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE profile ADD COLUMN base_gems INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE ledger ADD COLUMN gems INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE ledger ADD COLUMN items TEXT;
+   CREATE INDEX ledger_time ON ledger (created_at);
+   CREATE TABLE item (
+     item_id TEXT PRIMARY KEY,
+     qty INTEGER NOT NULL
+   );
+   CREATE TABLE purchase (
+     order_id TEXT PRIMARY KEY,
+     product_id TEXT NOT NULL,
+     provider TEXT NOT NULL,
+     amount INTEGER NOT NULL,
+     currency TEXT NOT NULL,
+     status TEXT NOT NULL,
+     external_id TEXT,
+     created_at INTEGER NOT NULL,
+     paid_at INTEGER
+   );`,
 ];
+
+/** 一小时内最多能有多少个还没付款的订单。 */
+export const MAX_PENDING_ORDERS = 20;
+/** 看一次广告的奖励，以及每天最多领多少次。 */
+export const AD_REWARD_COINS = 5;
+export const AD_DAILY_CAP = 10;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface Wallet {
+  coins: number;
+  gems: number;
+  items: Record<string, number>;
+}
+
+export type TxResult = "ok" | "duplicate" | "insufficient";
+export type OrderStatus = "pending" | "paid" | "refunded";
+
+export interface Order {
+  orderId: string;
+  productId: string;
+  provider: Provider;
+  amount: number;
+  currency: string;
+  status: OrderStatus;
+  externalId: string | null;
+}
+
+/** 支付平台告诉我们的付款信息。 */
+export interface PaymentProof {
+  provider: Provider;
+  amount: number;
+  currency: string;
+  /** 支付平台那边的流水号，退款和查账时要用。 */
+  externalId: string;
+}
+
+export type FulfillResult = "ok" | "duplicate" | "not_found" | "mismatch";
+export type RefundResult = "ok" | "duplicate" | "not_found" | "not_paid";
+export type AdResult = "ok" | "duplicate" | "capped";
+
+export interface Audit {
+  coins: number;
+  gems: number;
+  /** 按流水算出来应该有多少。 */
+  ledgerCoins: number;
+  ledgerGems: number;
+  ok: boolean;
+}
 
 /** 发件箱一次最多送出多少条，送出失败后隔多久重试。 */
 const OUTBOX_BATCH = 50;
@@ -178,6 +248,182 @@ export class Player extends DurableObject<Env> {
     const sql = this.ctx.storage.sql;
     const exists = sql.exec("SELECT 1 FROM identity LIMIT 1").toArray().length > 0;
     return { exists, createdAt: Number(sql.exec("SELECT created_at FROM profile WHERE id = 1").one().created_at) };
+  }
+
+  // ---- 钱包和背包 ----
+
+  getWallet(): Wallet {
+    const sql = this.ctx.storage.sql;
+    const row = sql.exec("SELECT coins, gems FROM profile WHERE id = 1").one();
+    const items: Record<string, number> = {};
+    for (const item of sql.exec("SELECT item_id, qty FROM item WHERE qty != 0")) {
+      items[String(item.item_id)] = Number(item.qty);
+    }
+    return { coins: Number(row.coins), gems: Number(row.gems), items };
+  }
+
+  /**
+   * 改动资产的统一入口：一个操作编号，一组变化量，要么全部生效，要么全部不生效。
+   * 编号相同的调用只生效一次；任何一项不够扣时整个操作被拒绝。
+   */
+  transact(opId: string, kind: string, delta: Delta): TxResult {
+    let outcome: TxResult = "ok";
+    this.ctx.storage.transactionSync(() => {
+      outcome = this.applyDelta(opId, kind, delta, Date.now());
+    });
+    return outcome;
+  }
+
+  /** 看完一次广告的奖励。奖励多少由服务端定，每天有上限。transactionId 是广告平台给这次观看的编号。 */
+  grantAdReward(transactionId: string, now: number): AdResult {
+    const sql = this.ctx.storage.sql;
+    const opId = `ad:${transactionId}`;
+    let outcome: AdResult = "duplicate";
+    this.ctx.storage.transactionSync(() => {
+      if (sql.exec("SELECT 1 FROM ledger WHERE op_id = ?", opId).toArray().length > 0) return;
+      const dayStart = now - (now % DAY_MS);
+      const today = sql
+        .exec("SELECT COUNT(*) AS n FROM ledger WHERE kind = 'ad' AND coins > 0 AND created_at >= ?", dayStart)
+        .one();
+      const capped = Number(today.n) >= AD_DAILY_CAP;
+      // 超过上限也记一行，金额为 0，这样同一次观看的通知再来时仍然会被认出是重复的。
+      this.applyDelta(opId, "ad", { coins: capped ? 0 : AD_REWARD_COINS }, now);
+      outcome = capped ? "capped" : "ok";
+    });
+    return outcome;
+  }
+
+  // ---- 订单 ----
+
+  /** 下单。价格由调用方按商品表填好，之后付款时要和这里记下的完全一致。 */
+  createOrder(orderId: string, productId: string, provider: Provider, now: number): Order | "unknown" | "too_many" {
+    const product = PRODUCTS[productId];
+    if (!product) return "unknown";
+    const sql = this.ctx.storage.sql;
+    const recent = sql
+      .exec("SELECT COUNT(*) AS n FROM purchase WHERE status = 'pending' AND created_at > ?", now - 60 * 60 * 1000)
+      .one();
+    if (Number(recent.n) >= MAX_PENDING_ORDERS) return "too_many";
+    const { amount, currency } = product.price[provider];
+    sql.exec(
+      `INSERT OR IGNORE INTO purchase (order_id, product_id, provider, amount, currency, status, created_at)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+      orderId,
+      productId,
+      provider,
+      amount,
+      currency,
+      now,
+    );
+    return this.getOrder(orderId)!;
+  }
+
+  getOrder(orderId: string): Order | null {
+    const row = this.ctx.storage.sql.exec("SELECT * FROM purchase WHERE order_id = ?", orderId).toArray()[0];
+    if (!row) return null;
+    return {
+      orderId: String(row.order_id),
+      productId: String(row.product_id),
+      provider: row.provider as Provider,
+      amount: Number(row.amount),
+      currency: String(row.currency),
+      status: row.status as OrderStatus,
+      externalId: row.external_id === null ? null : String(row.external_id),
+    };
+  }
+
+  /** 记下支付平台那边的编号（比如结账会话的 ID），以后主动查询付款状态时用。 */
+  setOrderExternal(orderId: string, externalId: string): void {
+    this.ctx.storage.sql.exec(
+      "UPDATE purchase SET external_id = ? WHERE order_id = ? AND status = 'pending'",
+      externalId,
+      orderId,
+    );
+  }
+
+  /**
+   * 发货。支付平台的回调可能来不止一次，也可能和主动查询同时到，所以这里必须能重复调用：
+   * 订单的状态和发出去的东西在同一个事务里修改，已经发过的订单不会再发。
+   */
+  async fulfillOrder(orderId: string, proof: PaymentProof, now: number): Promise<FulfillResult> {
+    const order = this.getOrder(orderId);
+    if (!order) return "not_found";
+    if (order.status !== "pending") return "duplicate";
+    // 付的钱必须和下单时记下的一致。不一致说明有人改了金额，或者配置出了错，都不能发货。
+    if (order.provider !== proof.provider || order.amount !== proof.amount || order.currency !== proof.currency) {
+      return "mismatch";
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.applyDelta(`order:${orderId}`, "purchase", PRODUCTS[order.productId]!.grant, now);
+      this.ctx.storage.sql.exec(
+        "UPDATE purchase SET status = 'paid', external_id = ?, paid_at = ? WHERE order_id = ?",
+        proof.externalId,
+        now,
+        orderId,
+      );
+      this.emitPayment(orderId, now);
+    });
+    await this.flush();
+    return "ok";
+  }
+
+  /**
+   * 退款：把发出去的东西收回来。已经花掉的部分会让余额变成负数，
+   * 玩家下次充值时先补上这部分。这是唯一允许余额为负的地方。
+   */
+  async refundOrder(orderId: string, now: number): Promise<RefundResult> {
+    const order = this.getOrder(orderId);
+    if (!order) return "not_found";
+    // 退款的通知比付款的通知先到。现在没有东西可收回，让调用方稍后再来。
+    if (order.status === "pending") return "not_paid";
+    if (order.status !== "paid") return "duplicate";
+    this.ctx.storage.transactionSync(() => {
+      this.applyDelta(`refund:${orderId}`, "refund", negate(PRODUCTS[order.productId]!.grant), now, true);
+      this.ctx.storage.sql.exec("UPDATE purchase SET status = 'refunded' WHERE order_id = ?", orderId);
+      this.emitPayment(orderId, now);
+    });
+    await this.flush();
+    return "ok";
+  }
+
+  // ---- 对账 ----
+
+  /** 余额应该等于所有流水的合计。对不上说明有代码绕过流水改了余额。 */
+  audit(): Audit {
+    const sql = this.ctx.storage.sql;
+    const profile = sql.exec("SELECT coins, gems, base_coins, base_gems FROM profile WHERE id = 1").one();
+    const sum = sql.exec("SELECT COALESCE(SUM(coins), 0) AS coins, COALESCE(SUM(gems), 0) AS gems FROM ledger").one();
+    const ledgerCoins = Number(profile.base_coins) + Number(sum.coins);
+    const ledgerGems = Number(profile.base_gems) + Number(sum.gems);
+    const coins = Number(profile.coins);
+    const gems = Number(profile.gems);
+    return { coins, gems, ledgerCoins, ledgerGems, ok: coins === ledgerCoins && gems === ledgerGems };
+  }
+
+  /**
+   * 清理早于指定时间的流水。被清掉的金额累加进一个基数里，对账时仍然算得平。
+   * 清掉的流水不能再用来去重，所以保留期要比任何一种重试可能持续的时间都长。
+   */
+  pruneLedger(before: number): number {
+    const sql = this.ctx.storage.sql;
+    let removed = 0;
+    this.ctx.storage.transactionSync(() => {
+      const old = sql
+        .exec(
+          "SELECT COUNT(*) AS n, COALESCE(SUM(coins), 0) AS coins, COALESCE(SUM(gems), 0) AS gems FROM ledger WHERE created_at < ?",
+          before,
+        )
+        .one();
+      removed = Number(old.n);
+      if (removed === 0) return;
+      sql.exec(
+        "UPDATE profile SET base_coins = base_coins + ?, base_gems = base_gems + ? WHERE id = 1",
+        Number(old.coins),
+        Number(old.gems),
+      );
+      sql.exec("DELETE FROM ledger WHERE created_at < ?", before);
+    });
+    return removed;
   }
 
   // ---- 好友 ----
@@ -386,6 +632,69 @@ export class Player extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec("UPDATE profile SET banned = 1 WHERE id = 1");
       this.ctx.storage.sql.exec("DELETE FROM session");
+    });
+  }
+
+  /**
+   * 执行一次资产变更并写流水。必须在事务里调用。
+   * allowDebt 只在退款时为真：这时货币可以扣成负数，物品最少扣到 0。
+   */
+  private applyDelta(opId: string, kind: string, delta: Delta, now: number, allowDebt = false): TxResult {
+    const sql = this.ctx.storage.sql;
+    if (sql.exec("SELECT 1 FROM ledger WHERE op_id = ?", opId).toArray().length > 0) return "duplicate";
+
+    const coins = delta.coins ?? 0;
+    const gems = delta.gems ?? 0;
+    const items = Object.entries(delta.items ?? {}).filter(([, qty]) => qty !== 0);
+    const held = new Map<string, number>();
+    for (const [itemId] of items) {
+      const row = sql.exec("SELECT qty FROM item WHERE item_id = ?", itemId).toArray()[0];
+      held.set(itemId, row ? Number(row.qty) : 0);
+    }
+
+    // 先检查，再修改。任何一项不够，整个操作都不做。
+    if (!allowDebt) {
+      const balance = sql.exec("SELECT coins, gems FROM profile WHERE id = 1").one();
+      if (Number(balance.coins) + coins < 0 || Number(balance.gems) + gems < 0) return "insufficient";
+      if (items.some(([itemId, qty]) => held.get(itemId)! + qty < 0)) return "insufficient";
+    }
+
+    sql.exec("UPDATE profile SET coins = coins + ?, gems = gems + ? WHERE id = 1", coins, gems);
+    for (const [itemId, qty] of items) {
+      sql.exec(
+        `INSERT INTO item (item_id, qty) VALUES (?, ?)
+         ON CONFLICT (item_id) DO UPDATE SET qty = excluded.qty`,
+        itemId,
+        Math.max(0, held.get(itemId)! + qty),
+      );
+    }
+    sql.exec(
+      "INSERT INTO ledger (op_id, kind, coins, gems, items, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      opId,
+      kind,
+      coins,
+      gems,
+      items.length > 0 ? JSON.stringify(Object.fromEntries(items)) : null,
+      now,
+    );
+    return "ok";
+  }
+
+  /** 把订单的当前状态发给 D1 里的支付记录。必须在事务里调用。 */
+  private emitPayment(orderId: string, now: number): void {
+    const row = this.ctx.storage.sql.exec("SELECT * FROM purchase WHERE order_id = ?", orderId).one();
+    this.emit({
+      type: "payment",
+      playerId: this.id,
+      orderId,
+      productId: String(row.product_id),
+      provider: String(row.provider),
+      amount: Number(row.amount),
+      currency: String(row.currency),
+      status: row.status as "paid" | "refunded",
+      externalId: row.external_id === null ? null : String(row.external_id),
+      paidAt: Number(row.paid_at),
+      at: now,
     });
   }
 
