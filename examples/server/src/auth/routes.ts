@@ -143,7 +143,7 @@ async function issue(env: Env, playerId: string, sessionId: string, refreshSecre
   };
 }
 
-async function readBody(request: Request): Promise<Record<string, unknown> | null> {
+export async function readBody(request: Request): Promise<Record<string, unknown> | null> {
   const text = await request.text();
   if (text.length > MAX_BODY_BYTES) return null;
   if (text === "") return {};

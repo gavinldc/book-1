@@ -25,7 +25,11 @@
 
   // 房间把对局记录送进队列，同一个 Worker 的 queue 处理函数负责写进 D1。
   "queues": {
-    "producers": [{ "binding": "MATCH_LOG", "queue": "match-log" }],
+    "producers": [
+      { "binding": "MATCH_LOG", "queue": "match-log" },
+      // 玩家对象对外的通知：分数变化、好友、邀请。
+      { "binding": "PLAYER_EVENTS", "queue": "player-events" }
+    ],
     "consumers": [
       {
         "queue": "match-log",
@@ -33,6 +37,14 @@
         "max_batch_timeout": 5,
         "max_retries": 5,
         "dead_letter_queue": "match-log-dlq"
+      },
+      {
+        "queue": "player-events",
+        "max_batch_size": 50,
+        // 好友申请要尽快到对方那里，所以只攒 1 秒。
+        "max_batch_timeout": 1,
+        "max_retries": 10,
+        "dead_letter_queue": "player-events-dlq"
       }
     ]
   },
@@ -64,7 +76,10 @@
       },
       "d1_databases": [{ "binding": "DB", "database_name": "game-example-staging", "migrations_dir": "migrations" }],
       "queues": {
-        "producers": [{ "binding": "MATCH_LOG", "queue": "match-log-staging" }],
+        "producers": [
+          { "binding": "MATCH_LOG", "queue": "match-log-staging" },
+          { "binding": "PLAYER_EVENTS", "queue": "player-events-staging" }
+        ],
         "consumers": [
           {
             "queue": "match-log-staging",
@@ -72,6 +87,13 @@
             "max_batch_timeout": 5,
             "max_retries": 5,
             "dead_letter_queue": "match-log-staging-dlq"
+          },
+          {
+            "queue": "player-events-staging",
+            "max_batch_size": 50,
+            "max_batch_timeout": 1,
+            "max_retries": 10,
+            "dead_letter_queue": "player-events-staging-dlq"
           }
         ]
       },

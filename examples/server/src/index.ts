@@ -2,6 +2,8 @@ import { authenticate, fail, handleAuth, json } from "./auth/routes";
 import { authenticateWebSocket, PLAYER_HEADER } from "./auth/websocket";
 import { saveRecords, type MatchRecord } from "./match/record";
 import { handleMatch } from "./match/routes";
+import { handlePlayerEvents, type PlayerEvent } from "./social/events";
+import { handleSocial } from "./social/routes";
 
 export { Identity } from "./identity";
 export { Matchmaker } from "./matchmaker";
@@ -35,6 +37,9 @@ export default {
     const matched = await handleMatch(request, env, url.pathname);
     if (matched) return matched;
 
+    const social = await handleSocial(request, env, url.pathname);
+    if (social) return social;
+
     const match = ROOM_WS.exec(url.pathname);
     if (match) {
       if (request.headers.get("Upgrade") !== "websocket") {
@@ -59,11 +64,18 @@ export default {
     return new Response("Not Found", { status: 404 });
   },
 
-  /** 对局记录的消费者：把一批记录写进 D1。抛出异常时整批会被重新投递，写入是幂等的。 */
-  async queue(batch: MessageBatch<MatchRecord>, env: Env): Promise<void> {
-    await saveRecords(
-      env.DB,
-      batch.messages.map((message) => message.body),
-    );
+  /**
+   * 两个队列共用这个处理函数，按队列的名字分发。
+   * 对局记录：整批写进 D1，抛出异常时整批重新投递。玩家通知：逐条确认。
+   */
+  async queue(batch: MessageBatch<MatchRecord | PlayerEvent>, env: Env): Promise<void> {
+    if (batch.queue.startsWith("match-log")) {
+      await saveRecords(
+        env.DB,
+        (batch as MessageBatch<MatchRecord>).messages.map((message) => message.body),
+      );
+    } else {
+      await handlePlayerEvents(batch as MessageBatch<PlayerEvent>, env);
+    }
   },
-} satisfies ExportedHandler<Env, MatchRecord>;
+} satisfies ExportedHandler<Env, MatchRecord | PlayerEvent>;

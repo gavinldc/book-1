@@ -249,6 +249,21 @@
 
 文档：[数据位置](https://developers.cloudflare.com/durable-objects/reference/data-location/)、[命名空间接口](https://developers.cloudflare.com/durable-objects/api/namespace/)、[队列限额](https://developers.cloudflare.com/queues/platform/limits/)、[队列定价](https://developers.cloudflare.com/queues/platform/pricing/)、[批量与重试](https://developers.cloudflare.com/queues/configuration/batching-retries/)、[D1 限额](https://developers.cloudflare.com/d1/platform/limits/)、[配置文件](https://developers.cloudflare.com/workers/wrangler/configuration/)、[测试接口](https://developers.cloudflare.com/workers/testing/vitest-integration/test-apis/)
 
+## 排行榜与社交
+
+核实日期：2026-11-24。
+
+- D1 计费：读取每月含 250 亿行，超出每百万行 0.001 美元；写入每月含 5,000 万行，超出每百万行 1.00 美元；存储含 5 GB，超出每 GB 每月 0.75 美元。免费版每天读 500 万行、写 10 万行。
+- D1 每条查询最多绑定 100 个参数。
+- D1 的读副本要通过会话接口（`withSession`）使用，否则所有查询都只在主库执行。
+- 缓存接口（`caches.default`）的内容不跨数据中心；官方说明部署在自定义域名上的 Worker 才有可用的缓存操作；`cache.delete` 只清除当前数据中心的内容。
+- KV 的键最短过期时间是 60 秒；写入在其他地点最长 60 秒后可见。
+- 按名字访问的对象可以从 `ctx.id.name` 读到自己的名字；通过 `idFromString()` 访问、用 `newUniqueId()` 创建、或者名字超过 1,024 字节时，这个值是 `undefined`。
+- 队列的消费者可以对单条消息调用 `ack()` 或 `retry({ delaySeconds })`；对同一条消息先调用的那个生效。
+- Telegram 小程序的直达链接可以带 `startapp` 参数，它会出现在 `initData` 的 `start_param` 字段里。
+
+文档：[D1 定价](https://developers.cloudflare.com/d1/platform/pricing/)、[D1 限额](https://developers.cloudflare.com/d1/platform/limits/)、[D1 读副本](https://developers.cloudflare.com/d1/best-practices/read-replication/)、[缓存接口](https://developers.cloudflare.com/workers/runtime-apis/cache/)、[KV 写入](https://developers.cloudflare.com/kv/api/write-key-value-pairs/)、[对象 ID](https://developers.cloudflare.com/durable-objects/api/id/)、[队列的 JavaScript 接口](https://developers.cloudflare.com/queues/configuration/javascript-apis/)、[Telegram 小程序](https://core.telegram.org/bots/webapps)
+
 ## 第三方：Ably
 
 核实日期：2026-11-24。这一节不是 Cloudflare 的限额，放在这里是因为 5.11 节把它作为全局广播的备选方案。
