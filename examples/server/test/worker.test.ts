@@ -1,33 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import type { ServerMessage } from "@game/shared";
-
-const BASE = "http://example.com";
-
-/** 通过 Worker 入口连进房间，返回连接和一个按顺序读取消息的函数。 */
-async function connect(room: string, player: string) {
-  const response = await exports.default.fetch(
-    new Request(`${BASE}/room/${room}/ws?player=${player}`, { headers: { Upgrade: "websocket" } }),
-  );
-  expect(response.status).toBe(101);
-  const ws = response.webSocket!;
-  const queue: ServerMessage[] = [];
-  const waiters: ((message: ServerMessage) => void)[] = [];
-  ws.addEventListener("message", (event) => {
-    const message = JSON.parse(event.data as string) as ServerMessage;
-    const waiter = waiters.shift();
-    if (waiter) waiter(message);
-    else queue.push(message);
-  });
-  ws.accept();
-  const next = () =>
-    new Promise<ServerMessage>((resolve) => {
-      const message = queue.shift();
-      if (message) resolve(message);
-      else waiters.push(resolve);
-    });
-  return { ws, next };
-}
+import { BASE, connect, get, guest, openSocket } from "./helpers";
 
 describe("HTTP 接口", () => {
   it("健康检查", async () => {
@@ -36,24 +9,35 @@ describe("HTTP 接口", () => {
   });
 
   it("房间地址必须用 WebSocket 访问", async () => {
-    const response = await exports.default.fetch(new Request(`${BASE}/room/r0/ws?player=a`));
+    const response = await exports.default.fetch(new Request(`${BASE}/room/r0/ws`));
     expect(response.status).toBe(426);
   });
 
-  it("缺少玩家 ID 时拒绝", async () => {
-    const response = await exports.default.fetch(
-      new Request(`${BASE}/room/r0/ws`, { headers: { Upgrade: "websocket" } }),
-    );
-    expect(response.status).toBe(400);
+  it("没有令牌不能进房间", async () => {
+    expect((await openSocket("r0", null)).status).toBe(401);
+    expect((await openSocket("r0", "not-a-token")).status).toBe(401);
+  });
+
+  it("客户端自带的玩家 ID 请求头不起作用", async () => {
+    const session = await guest();
+    const response = await openSocket("r-header", session.accessToken, { "X-Player-Id": "someone-else" });
+    expect(response.status).toBe(101);
+    expect(response.headers.get("Sec-WebSocket-Protocol")).toBe("game.v1");
+    const ws = response.webSocket!;
+    const first = new Promise<string>((resolve) => ws.addEventListener("message", (e) => resolve(e.data as string)));
+    ws.accept();
+    const message = JSON.parse(await first);
+    expect(message.state.players.map((p: { id: string }) => p.id)).toEqual([session.playerId]);
+    ws.close();
   });
 });
 
 describe("房间", () => {
   it("两人准备后开始，并按回合掷骰子", async () => {
-    const a = await connect("r1", "a");
+    const a = await connect("r1");
     expect(await a.next()).toMatchObject({ type: "state", state: { phase: "waiting" } });
 
-    const b = await connect("r1", "b");
+    const b = await connect("r1");
     await a.next(); // b 加入的广播
     await b.next();
 
@@ -80,7 +64,7 @@ describe("房间", () => {
   });
 
   it("不合法的消息会收到错误", async () => {
-    const a = await connect("r2", "a");
+    const a = await connect("r2");
     await a.next();
     a.ws.send("不是 JSON");
     expect(await a.next()).toEqual({ type: "error", code: "bad_message" });
@@ -88,12 +72,12 @@ describe("房间", () => {
   });
 
   it("心跳由平台自动应答", async () => {
-    const response = await exports.default.fetch(
-      new Request(`${BASE}/room/r-ping/ws?player=a`, { headers: { Upgrade: "websocket" } }),
-    );
+    const response = await openSocket("r-ping", (await guest()).accessToken);
     const ws = response.webSocket!;
     const messages: string[] = [];
-    ws.addEventListener("message", (event) => messages.push(event.data as string));
+    ws.addEventListener("message", (event) => {
+      messages.push(event.data as string);
+    });
     ws.accept();
     ws.send("ping");
     await expect.poll(() => messages).toContain("pong");
@@ -101,7 +85,7 @@ describe("房间", () => {
   });
 
   it("不同房间互不影响", async () => {
-    const a = await connect("r3", "a");
+    const a = await connect("r3");
     const first = await a.next();
     if (first.type !== "state") throw new Error("应该收到状态");
     expect(first.state.players).toHaveLength(1);
@@ -111,8 +95,13 @@ describe("房间", () => {
 
 describe("玩家数据与结算", () => {
   it("新玩家的初始数据", async () => {
-    const response = await exports.default.fetch(new Request(`${BASE}/player/newbie`));
-    expect(await response.json()).toEqual({ coins: 0, wins: 0, games: 0 });
+    const session = await guest();
+    const response = await get("/me", session.accessToken);
+    expect(await response.json()).toEqual({
+      playerId: session.playerId,
+      profile: { coins: 0, wins: 0, games: 0 },
+      identities: ["guest"],
+    });
   });
 
   it("同一局的结果重复提交只生效一次", async () => {
@@ -126,9 +115,9 @@ describe("玩家数据与结算", () => {
   });
 
   it("对局结束后双方的数据都被更新", async () => {
-    const a = await connect("settle", "sa");
+    const a = await connect("settle");
     await a.next();
-    const b = await connect("settle", "sb");
+    const b = await connect("settle");
     await a.next();
     await b.next();
     a.ws.send(JSON.stringify({ type: "ready" }));
@@ -147,7 +136,7 @@ describe("玩家数据与结算", () => {
     }
     if (message.type !== "state") throw new Error("应该收到状态");
     const winner = message.state.winner!;
-    const loser = winner === "sa" ? "sb" : "sa";
+    const loser = winner === a.playerId ? b.playerId : a.playerId;
 
     await expect.poll(() => env.PLAYER.getByName(winner).getProfile()).toEqual({ coins: 10, wins: 1, games: 1 });
     await expect.poll(() => env.PLAYER.getByName(loser).getProfile()).toEqual({ coins: 0, wins: 0, games: 1 });

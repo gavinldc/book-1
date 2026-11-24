@@ -15,10 +15,10 @@
   </head>
   <body>
     <h1>联调客户端</h1>
-    <p>只用来验证协议，书里不讲解。开两个浏览器窗口，用同一个房间号、不同的玩家 ID 连接。</p>
+    <p>只用来验证协议，书里不讲解。开两个浏览器窗口（其中一个用无痕模式，这样是两个不同的游客账号），用同一个房间号连接。</p>
     <div class="row">
       <input id="room" value="demo" aria-label="房间号" />
-      <input id="player" aria-label="玩家 ID" />
+      <span id="player">未登录</span>
       <button id="connect">连接</button>
     </div>
     <div class="row">
@@ -29,19 +29,38 @@
     <pre id="state">未连接</pre>
     <script>
       const $ = (id) => document.getElementById(id);
-      $("player").value = "p" + Math.floor(Math.random() * 1000);
       let ws = null;
+
+      // 游客登录：第一次由服务端生成凭证，保存在本地；以后带着凭证回到同一个账号。
+      async function login() {
+        const secret = localStorage.getItem("guestSecret");
+        const response = await fetch("/auth/guest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(secret ? { secret } : {}),
+        });
+        if (!response.ok) throw new Error("登录失败：" + response.status);
+        const session = await response.json();
+        if (session.guestSecret) localStorage.setItem("guestSecret", session.guestSecret);
+        $("player").textContent = session.playerId;
+        return session;
+      }
 
       function send(type) {
         ws.send(JSON.stringify({ type }));
       }
 
-      $("connect").onclick = () => {
+      $("connect").onclick = async () => {
         if (ws) ws.close();
+        const session = await login().catch((error) => {
+          $("error").textContent = error.message;
+          return null;
+        });
+        if (!session) return;
         const scheme = location.protocol === "https:" ? "wss" : "ws";
         const room = encodeURIComponent($("room").value);
-        const player = encodeURIComponent($("player").value);
-        ws = new WebSocket(`${scheme}://${location.host}/room/${room}/ws?player=${player}`);
+        // 浏览器的 WebSocket 不能设置请求头，访问令牌放在子协议里。
+        ws = new WebSocket(`${scheme}://${location.host}/room/${room}/ws`, ["game.v1", "auth." + session.accessToken]);
         ws.onopen = () => {
           $("ready").disabled = $("roll").disabled = false;
           $("error").textContent = "";

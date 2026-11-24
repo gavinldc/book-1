@@ -25,7 +25,7 @@ TypeScript 全栈，用 Workers + Durable Objects 搭建出海游戏后端。
 
 | 章 | 标题 | 状态 |
 |---|---|---|
-| 4 | [账号与鉴权](book/04-auth.md) | 未开始 |
+| 4 | [账号与鉴权](book/04-auth.md) | 初稿 |
 | 5 | [房间与实时对战](book/05-rooms-realtime.md) | 未开始 |
 | 6 | [匹配与异步 PVP](book/06-matchmaking-async-pvp.md) | 未开始 |
 | 7 | [排行榜与社交](book/07-leaderboard-social.md) | 未开始 |

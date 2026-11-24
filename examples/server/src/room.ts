@@ -8,6 +8,8 @@ import {
   type ServerMessage,
 } from "@game/shared";
 
+import { PLAYER_HEADER, WS_PROTOCOL } from "./auth/websocket";
+
 const STATE_KEY = "state";
 const PENDING_KEY = "pending_settlement";
 
@@ -36,7 +38,9 @@ export class Room extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
-    const playerId = new URL(request.url).searchParams.get("player")!;
+    // 对象只能从入口 Worker 访问，这个请求头由入口在校验令牌之后写入。
+    const playerId = request.headers.get(PLAYER_HEADER);
+    if (!playerId) return new Response("缺少玩家身份", { status: 401 });
 
     const state = await this.load();
     const joined = applyAction(state, { type: "join", playerId });
@@ -53,7 +57,12 @@ export class Room extends DurableObject<Env> {
 
     await this.save(joined.state);
     this.broadcast({ type: "state", state: joined.state });
-    return new Response(null, { status: 101, webSocket: client });
+    // 客户端声明了子协议，应答里必须选定其中一个，否则浏览器会断开连接。
+    return new Response(null, {
+      status: 101,
+      webSocket: client,
+      headers: { "Sec-WebSocket-Protocol": WS_PROTOCOL },
+    });
   }
 
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {

@@ -29,7 +29,32 @@ const MIGRATIONS: string[] = [
      coins INTEGER NOT NULL,
      created_at INTEGER NOT NULL
    );`,
+  `CREATE TABLE session (
+     id TEXT PRIMARY KEY,
+     refresh_hash TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     expires_at INTEGER NOT NULL
+   );
+   CREATE TABLE identity (
+     provider TEXT PRIMARY KEY,
+     name TEXT NOT NULL,
+     linked_at INTEGER NOT NULL
+   );
+   ALTER TABLE profile ADD COLUMN banned INTEGER NOT NULL DEFAULT 0;`,
 ];
+
+/** 刷新凭证的有效期。每次刷新都会顺延。 */
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** 一个玩家同时保留的会话数，超出时删掉最旧的。 */
+const MAX_SESSIONS = 5;
+
+export type SessionResult = "ok" | "banned" | "invalid";
+
+export interface Account {
+  banned: boolean;
+  /** 已绑定的身份，键是来源（guest、telegram），值是身份对象的名字。 */
+  identities: Record<string, string>;
+}
 
 /**
  * 一个玩家一个对象，保存这个玩家自己的数据。
@@ -65,6 +90,82 @@ export class Player extends DurableObject<Env> {
       );
     });
     return this.readProfile();
+  }
+
+  /** 登录成功后开一个会话。只保存刷新凭证的哈希，不保存原文。 */
+  openSession(sessionId: string, refreshHash: string, now: number): SessionResult {
+    if (this.isBanned()) return "banned";
+    const sql = this.ctx.storage.sql;
+    this.ctx.storage.transactionSync(() => {
+      sql.exec("DELETE FROM session WHERE expires_at <= ?", now);
+      sql.exec(
+        "INSERT INTO session (id, refresh_hash, created_at, expires_at) VALUES (?, ?, ?, ?)",
+        sessionId,
+        refreshHash,
+        now,
+        now + SESSION_TTL_MS,
+      );
+      sql.exec(
+        "DELETE FROM session WHERE id NOT IN (SELECT id FROM session ORDER BY created_at DESC LIMIT ?)",
+        MAX_SESSIONS,
+      );
+    });
+    return "ok";
+  }
+
+  /**
+   * 用旧的刷新凭证换新的。旧凭证只能用一次：
+   * 如果有人拿着已经用过的凭证来刷新，说明凭证可能泄露，整个会话作废。
+   */
+  rotateSession(sessionId: string, currentHash: string, nextHash: string, now: number): SessionResult {
+    if (this.isBanned()) return "banned";
+    const sql = this.ctx.storage.sql;
+    const row = sql.exec("SELECT refresh_hash, expires_at FROM session WHERE id = ?", sessionId).toArray()[0];
+    if (!row || Number(row.expires_at) <= now) return "invalid";
+    if (row.refresh_hash !== currentHash) {
+      sql.exec("DELETE FROM session WHERE id = ?", sessionId);
+      return "invalid";
+    }
+    sql.exec(
+      "UPDATE session SET refresh_hash = ?, expires_at = ? WHERE id = ?",
+      nextHash,
+      now + SESSION_TTL_MS,
+      sessionId,
+    );
+    return "ok";
+  }
+
+  closeSession(sessionId: string): void {
+    this.ctx.storage.sql.exec("DELETE FROM session WHERE id = ?", sessionId);
+  }
+
+  /** 记下自己绑定了哪个身份。同一来源只能绑一个，重复调用不会出错。 */
+  linkIdentity(provider: string, name: string, now: number): boolean {
+    const sql = this.ctx.storage.sql;
+    const existing = sql.exec("SELECT name FROM identity WHERE provider = ?", provider).toArray()[0];
+    if (existing) return existing.name === name;
+    sql.exec("INSERT INTO identity (provider, name, linked_at) VALUES (?, ?, ?)", provider, name, now);
+    return true;
+  }
+
+  getAccount(): Account {
+    const identities: Record<string, string> = {};
+    for (const row of this.ctx.storage.sql.exec("SELECT provider, name FROM identity")) {
+      identities[String(row.provider)] = String(row.name);
+    }
+    return { banned: this.isBanned(), identities };
+  }
+
+  /** 封禁并让所有会话失效。已经签发的访问令牌最长还能用到它自己过期。 */
+  ban(): void {
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec("UPDATE profile SET banned = 1 WHERE id = 1");
+      this.ctx.storage.sql.exec("DELETE FROM session");
+    });
+  }
+
+  private isBanned(): boolean {
+    return Number(this.ctx.storage.sql.exec("SELECT banned FROM profile WHERE id = 1").one().banned) === 1;
   }
 
   private readProfile(): Profile {

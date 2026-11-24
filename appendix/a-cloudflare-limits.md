@@ -197,3 +197,18 @@
 - 每个 D1 数据库是单线程的，一次处理一条查询。
 
 文档：[DO 的 SQLite 存储接口](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)、[DO 定时器](https://developers.cloudflare.com/durable-objects/api/alarms/)、[DO 使用规则](https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/)、[D1 时间旅行](https://developers.cloudflare.com/d1/reference/time-travel/)
+
+## 限流绑定与密钥
+
+核实日期：2026-11-24。
+
+- 限流绑定的周期只能是 10 秒或 60 秒，需要 wrangler 4.36.0 或更高版本。
+- 限流是近似的，计数最终一致，实际放行的请求数可能超过设定值。
+- 限流按 Cloudflare 节点各自计数，不会合并成全球上限。
+- `namespace_id` 相同的绑定在同一账号内共用计数，跨 Worker 也是如此。
+- 配置里声明 `secrets.required` 后：缺少密钥时发布失败；类型由它生成，不再从 `.dev.vars` 推断；本地只加载列出的名字。
+- `.dev.vars` 和 `.env` 二选一，前者存在时后者不会被加载。
+- `wrangler secret put` 会立即创建并发布一个新版本；灰度发布时用 `wrangler versions secret put`。
+- `crypto.subtle.timingSafeEqual` 是 Workers 对 Web Crypto 的非标准扩展。
+
+文档：[限流绑定](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)、[密钥](https://developers.cloudflare.com/workers/configuration/secrets/)、[配置文件的 secrets 属性](https://developers.cloudflare.com/workers/wrangler/configuration/#secrets-configuration-property)、[Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)、[Telegram 小程序数据校验](https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app)

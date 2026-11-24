@@ -1,9 +1,11 @@
+import { authenticate, fail, handleAuth, json } from "./auth/routes";
+import { authenticateWebSocket, PLAYER_HEADER } from "./auth/websocket";
+
+export { Identity } from "./identity";
 export { Player } from "./player";
 export { Room } from "./room";
 
 const ROOM_WS = /^\/room\/([A-Za-z0-9_-]{1,32})\/ws$/;
-const PLAYER_ID = /^[A-Za-z0-9_-]{1,32}$/;
-const PLAYER_PROFILE = /^\/player\/([A-Za-z0-9_-]{1,32})$/;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -13,10 +15,17 @@ export default {
       return Response.json({ ok: true, environment: env.ENVIRONMENT });
     }
 
-    const profile = PLAYER_PROFILE.exec(url.pathname);
-    if (profile) {
-      // 通过 RPC 直接调用玩家对象上的方法。
-      return Response.json(await env.PLAYER.getByName(profile[1]!).getProfile());
+    if (url.pathname.startsWith("/auth/")) {
+      return handleAuth(request, env, url.pathname);
+    }
+
+    if (url.pathname === "/me") {
+      const claims = await authenticate(request, env);
+      if (!claims) return fail(401, "unauthorized");
+      // 玩家 ID 只从令牌里取，不接受客户端另外传入。
+      const player = env.PLAYER.getByName(claims.sub);
+      const [profile, account] = await Promise.all([player.getProfile(), player.getAccount()]);
+      return json({ playerId: claims.sub, profile, identities: Object.keys(account.identities) });
     }
 
     const match = ROOM_WS.exec(url.pathname);
@@ -24,12 +33,13 @@ export default {
       if (request.headers.get("Upgrade") !== "websocket") {
         return new Response("需要 WebSocket 连接", { status: 426 });
       }
-      // 第 4 章会把这里换成真正的鉴权，目前直接信任查询参数里的玩家 ID。
-      const playerId = url.searchParams.get("player") ?? "";
-      if (!PLAYER_ID.test(playerId)) {
-        return new Response("缺少合法的 player 参数", { status: 400 });
-      }
-      return env.ROOM.getByName(match[1]!).fetch(request);
+      const playerId = await authenticateWebSocket(request, env);
+      if (!playerId) return fail(401, "unauthorized");
+
+      // 先删掉客户端可能自带的同名请求头，再写入校验过的玩家 ID。
+      const headers = new Headers(request.headers);
+      headers.set(PLAYER_HEADER, playerId);
+      return env.ROOM.getByName(match[1]!).fetch(new Request(request, { headers }));
     }
 
     return new Response("Not Found", { status: 404 });

@@ -8,13 +8,21 @@
   "durable_objects": {
     "bindings": [
       { "name": "ROOM", "class_name": "Room" },
-      { "name": "PLAYER", "class_name": "Player" }
+      { "name": "PLAYER", "class_name": "Player" },
+      { "name": "IDENTITY", "class_name": "Identity" }
     ]
   },
   "exports": {
     "Room": { "type": "durable-object", "storage": "sqlite" },
-    "Player": { "type": "durable-object", "storage": "sqlite" }
+    "Player": { "type": "durable-object", "storage": "sqlite" },
+    "Identity": { "type": "durable-object", "storage": "sqlite" }
   },
+
+  // 必须存在的密钥。本地从 .dev.vars 读取，线上用 wrangler secret put 设置，缺少时发布会失败。
+  "secrets": { "required": ["SESSION_SECRET", "TELEGRAM_BOT_TOKEN"] },
+
+  // 登录接口的限流：同一个来源地址在一个节点上每分钟大约 20 次。
+  "ratelimits": [{ "name": "AUTH_LIMITER", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } }],
 
   // 联调用的最小客户端，作为静态资源一起发布。
   "assets": { "directory": "../client" },
@@ -30,9 +38,12 @@
       "durable_objects": {
         "bindings": [
           { "name": "ROOM", "class_name": "Room" },
-          { "name": "PLAYER", "class_name": "Player" }
+          { "name": "PLAYER", "class_name": "Player" },
+          { "name": "IDENTITY", "class_name": "Identity" }
         ]
       },
+      "secrets": { "required": ["SESSION_SECRET", "TELEGRAM_BOT_TOKEN"] },
+      "ratelimits": [{ "name": "AUTH_LIMITER", "namespace_id": "1002", "simple": { "limit": 20, "period": 60 } }],
       "vars": { "ENVIRONMENT": "staging" }
     }
   }
