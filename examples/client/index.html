@@ -30,6 +30,7 @@
     <script>
       const $ = (id) => document.getElementById(id);
       let ws = null;
+      let version = 0;
 
       // 游客登录：第一次由服务端生成凭证，保存在本地；以后带着凭证回到同一个账号。
       async function login() {
@@ -46,8 +47,8 @@
         return session;
       }
 
-      function send(type) {
-        ws.send(JSON.stringify({ type }));
+      function send(message) {
+        ws.send(JSON.stringify(message));
       }
 
       $("connect").onclick = async () => {
@@ -57,6 +58,7 @@
           return null;
         });
         if (!session) return;
+        version = 0;
         const scheme = location.protocol === "https:" ? "wss" : "ws";
         const room = encodeURIComponent($("room").value);
         // 浏览器的 WebSocket 不能设置请求头，访问令牌放在子协议里。
@@ -65,22 +67,28 @@
           $("ready").disabled = $("roll").disabled = false;
           $("error").textContent = "";
         };
-        ws.onclose = () => {
+        ws.onclose = (event) => {
           $("ready").disabled = $("roll").disabled = true;
-          $("state").textContent = "连接已断开";
+          $("state").textContent = "连接已断开（关闭码 " + event.code + "）。再点一次连接可以回到对局。";
         };
         ws.onmessage = (event) => {
           const message = JSON.parse(event.data);
           if (message.type === "state") {
+            // 只接受更新的状态，过时的丢弃。
+            if (message.state.version < version) return;
+            version = message.state.version;
             $("error").textContent = "";
-            $("state").textContent = JSON.stringify(message.state, null, 2);
+            const left = message.deadline ? Math.max(0, Math.round((message.deadline - Date.now()) / 1000)) : null;
+            $("state").textContent =
+              (left === null ? "" : "本回合剩余约 " + left + " 秒\n") + JSON.stringify(message.state, null, 2);
           } else {
             $("error").textContent = "错误：" + message.code;
           }
         };
       };
-      $("ready").onclick = () => send("ready");
-      $("roll").onclick = () => send("roll");
+      $("ready").onclick = () => send({ type: "ready" });
+      // 带上自己看到的状态版本号，服务端据此拒绝过时的操作。
+      $("roll").onclick = () => send({ type: "roll", version });
     </script>
   </body>
 </html>

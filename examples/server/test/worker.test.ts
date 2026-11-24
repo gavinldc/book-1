@@ -45,14 +45,19 @@ describe("房间", () => {
     await a.next();
     await b.next();
     b.ws.send(JSON.stringify({ type: "ready" }));
-    expect(await a.next()).toMatchObject({ type: "state", state: { phase: "playing", turn: 0 } });
+    const started = await a.next();
+    expect(started).toMatchObject({ type: "state", state: { phase: "playing", turn: 0 } });
+    if (started.type !== "state") throw new Error("应该收到状态");
+    // 开局后带着回合的截止时间。
+    expect(started.deadline).toBeGreaterThan(Date.now());
     await b.next();
+    const version = started.state.version;
 
     // 还没轮到 b。
-    b.ws.send(JSON.stringify({ type: "roll" }));
+    b.ws.send(JSON.stringify({ type: "roll", version }));
     expect(await b.next()).toEqual({ type: "error", code: "not_your_turn" });
 
-    a.ws.send(JSON.stringify({ type: "roll" }));
+    a.ws.send(JSON.stringify({ type: "roll", version }));
     const afterRoll = await a.next();
     if (afterRoll.type !== "state") throw new Error("应该收到状态");
     expect(afterRoll.state.turn).toBe(1);
@@ -130,7 +135,7 @@ describe("玩家数据与结算", () => {
     // 轮流掷骰子直到有人到达终点。
     const sockets = [a, b];
     while (message.type === "state" && message.state.phase === "playing") {
-      sockets[message.state.turn]!.ws.send(JSON.stringify({ type: "roll" }));
+      sockets[message.state.turn]!.ws.send(JSON.stringify({ type: "roll", version: message.state.version }));
       message = await a.next();
       await b.next();
     }

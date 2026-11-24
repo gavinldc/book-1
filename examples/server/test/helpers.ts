@@ -86,5 +86,25 @@ export async function connect(room: string, session?: Session) {
       if (message) resolve(message);
       else waiters.push(resolve);
     });
-  return { ws, next, playerId };
+  const closed = new Promise<number>((resolve) => ws.addEventListener("close", (event) => resolve(event.code)));
+  return { ws, next, playerId, closed, session: session ?? null };
+}
+
+/** 两个新玩家进同一个房间并都准备好，返回双方的连接和开局时的状态。 */
+export async function startGame(room: string) {
+  const sa = await guest();
+  const sb = await guest();
+  const a = await connect(room, sa);
+  await a.next();
+  const b = await connect(room, sb);
+  await a.next();
+  await b.next();
+  a.ws.send(JSON.stringify({ type: "ready" }));
+  await a.next();
+  await b.next();
+  b.ws.send(JSON.stringify({ type: "ready" }));
+  const started = await a.next();
+  await b.next();
+  if (started.type !== "state") throw new Error("应该收到状态");
+  return { a, b, sa, sb, state: started.state, deadline: started.deadline };
 }

@@ -212,3 +212,35 @@
 - `crypto.subtle.timingSafeEqual` 是 Workers 对 Web Crypto 的非标准扩展。
 
 文档：[限流绑定](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)、[密钥](https://developers.cloudflare.com/workers/configuration/secrets/)、[配置文件的 secrets 属性](https://developers.cloudflare.com/workers/wrangler/configuration/#secrets-configuration-property)、[Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)、[Telegram 小程序数据校验](https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app)
+
+## 房间与连接
+
+核实日期：2026-11-24。
+
+- 每条托管的 WebSocket 最多 10 个标签，每个标签最长 256 个字符。
+- 连接的附加数据序列化后最大 16,384 字节；连接关闭后附加数据丢失。
+- 收到的 WebSocket 消息单条上限 32 MiB。
+- 协议层的 ping 帧由运行时自动应答，不唤醒对象，也不计费。
+- 兼容日期在 2026-04-07 及之后，运行时自动完成关闭握手（`web_socket_auto_reply_to_close`）。
+- 兼容日期在 2026-02-24 及之后，`deleteAll()` 会同时删除定时器；更早的需要单独调用 `deleteAlarm()`。
+- SQLite 存储的 `deleteAll()` 是原子的。
+- `getAlarm()` 在定时器处理函数运行期间返回 `null`，除非处理函数里又调用过 `setAlarm()`。
+- 每次收到 HTTP 请求或 WebSocket 消息，对象可用的 CPU 时间重置为 30 秒（可通过 `limits.cpu_ms` 调到 5 分钟）。
+- 官方建议把多条逻辑消息合并成一帧发送，高频数据按 50 到 100 毫秒或 50 到 100 条合并一次。
+
+文档：[在 DO 里使用 WebSocket](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)、[DO 的 State 接口](https://developers.cloudflare.com/durable-objects/api/state/)、[DO 限额](https://developers.cloudflare.com/durable-objects/platform/limits/)、[DO 定价](https://developers.cloudflare.com/durable-objects/platform/pricing/)
+
+## 第三方：Ably
+
+核实日期：2026-11-24。这一节不是 Cloudflare 的限额，放在这里是因为 5.11 节把它作为全局广播的备选方案。
+
+- 按月活跃用户数计费，以 `clientId` 区分用户；免费版每月 500 个月活。
+- Pro 年付价：1,000 月活每月 29 美元，10,000 月活 249 美元，50,000 月活 1,149 美元；超出部分每个月活 0.05 美元。
+- 直接调用 REST 接口的服务端请求要带 `clientType=server`，否则按用户计数。
+- 付费套餐：并发连接 100,000；每个 `clientId` 并发连接 10；每个频道每秒发布 100 条；每条连接每秒收发各 100 条；每条连接最多加入 200 个频道。
+- 单条消息上限：免费版 64 KiB，付费版 256 KiB。
+- 在线状态成员每个频道 200，开启服务端批处理后付费版 10,000。
+- 令牌最长 24 小时；开启令牌吊销的密钥签出的令牌最长 1 小时。
+- JWT 用 HS256 签名，`kid` 填密钥名，必须带 `x-ably-capability`，`x-ably-clientId` 可选。
+
+文档：[定价概览](https://ably.com/docs/platform/pricing)、[限额](https://ably.com/docs/platform/pricing/limits)、[令牌认证](https://ably.com/docs/auth/token)、[JWT](https://ably.com/docs/auth/token/jwt)、[权限](https://ably.com/docs/auth/capabilities)、[REST 接口](https://ably.com/docs/api/rest-api)
