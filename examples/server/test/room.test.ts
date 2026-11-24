@@ -3,7 +3,7 @@ import { runDurableObjectAlarm } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CloseCode, type ServerMessage } from "@game/shared";
 import { LINGER_MS, TURN_MS } from "../src/room";
-import { connect, guest, openSocket, startGame } from "./helpers";
+import { connect, guest, openSocket, roomStub, startGame } from "./helpers";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -13,7 +13,7 @@ afterEach(() => {
 async function advance(room: string, ms: number) {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(Date.now() + ms);
-  await runDurableObjectAlarm(env.ROOM.getByName(room));
+  await runDurableObjectAlarm((await roomStub(room)));
 }
 
 function expectState(message: ServerMessage) {
@@ -68,7 +68,7 @@ describe("断线重连", () => {
     await a.next();
     a.ws.close();
     await a.closed;
-    const stub = env.ROOM.getByName("re4");
+    const stub = await roomStub("re4");
     await expect.poll(async () => (await stub.debugStorageKeys()).length).toBe(0);
   });
 });
@@ -101,7 +101,7 @@ describe("回合计时", () => {
 
   it("定时器提前触发时什么都不做", async () => {
     const { a, b, state } = await startGame("turn2");
-    await runDurableObjectAlarm(env.ROOM.getByName("turn2"));
+    await runDurableObjectAlarm((await roomStub("turn2")));
     a.ws.send(JSON.stringify({ type: "roll", version: state.version }));
     // 第一条收到的就是掷骰子的结果，中间没有多出一次轮空。
     expect(expectState(await b.next()).state.version).toBe(state.version + 1);
@@ -120,8 +120,8 @@ describe("回合计时", () => {
     await expect.poll(() => env.PLAYER.getByName(sb.playerId).getProfile()).toMatchObject({ wins: 1, coins: 10 });
     expect(await env.PLAYER.getByName(sa.playerId).getProfile()).toMatchObject({ wins: 0, games: 1 });
 
-    const stub = env.ROOM.getByName("turn3");
-    expect((await stub.debugStorageKeys()).sort()).toEqual(["state", "timers"]);
+    const stub = await roomStub("turn3");
+    expect((await stub.debugStorageKeys()).sort()).toEqual(["config", "log", "state", "timers"]);
     await advance("turn3", LINGER_MS + 1);
     expect(await stub.debugStorageKeys()).toEqual([]);
   });
@@ -137,14 +137,14 @@ describe("房间的结束", () => {
 
     await advance("end1", LINGER_MS + 1);
     expect(await b.closed).toBe(CloseCode.RoomClosed);
-    expect(await env.ROOM.getByName("end1").debugStorageKeys()).toEqual([]);
+    expect(await (await roomStub("end1")).debugStorageKeys()).toEqual([]);
   });
 });
 
 describe("管理与防护", () => {
   it("被踢出的玩家连接断开，对局中等同于弃权", async () => {
     const { a, b, sa } = await startGame("kick1");
-    await env.ROOM.getByName("kick1").kick(sa.playerId);
+    await (await roomStub("kick1")).kick(sa.playerId);
     expect(await a.closed).toBe(CloseCode.Kicked);
     expect(expectState(await b.next()).state).toMatchObject({ phase: "finished", winner: b.playerId });
     b.ws.close();

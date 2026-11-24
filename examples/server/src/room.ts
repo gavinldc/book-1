@@ -4,7 +4,9 @@ import {
   CloseCode,
   currentPlayer,
   initialState,
+  isServerSeat,
   parseClientMessage,
+  ratingDelta,
   type Action,
   type RoomState,
   type RuleError,
@@ -12,7 +14,10 @@ import {
 } from "@game/shared";
 
 import { PLAYER_HEADER, WS_PROTOCOL } from "./auth/websocket";
+import type { LogEntry, MatchRecord } from "./match/record";
 
+const CONFIG_KEY = "config";
+const LOG_KEY = "log";
 const STATE_KEY = "state";
 const PENDING_KEY = "pending_settlement";
 const TIMERS_KEY = "timers";
@@ -24,14 +29,42 @@ export const TURN_MS = 30_000;
 const RETRY_DELAY_MS = 5_000;
 /** 对局结束后房间保留多久，让玩家看完结果。 */
 export const LINGER_MS = 60_000;
+/** 匹配房：开房后这么久还没开局（有人没来、没准备），房间作废。 */
+export const JOIN_MS = 30_000;
+/** 好友房：建好后这么久还没开局，房间作废。 */
+export const IDLE_MS = 10 * 60_000;
+/** 机器人"思考"的时间：最短这么久，再加一段随机的时间。 */
+export const BOT_MIN_MS = 1_000;
+export const BOT_SPREAD_MS = 2_000;
 /** 每条连接在一个时间窗口内最多发多少条消息。 */
 const RATE_WINDOW_MS = 10_000;
 const RATE_MAX_MESSAGES = 20;
 
-/** 一局结束后要发给各个玩家对象的结算内容。发放成功之前一直保存在存储里。 */
+/** 由服务端操作的座位。 */
+export interface BotSeat {
+  /** bot: 开头是补位的机器人，ghost: 开头是某个玩家的录像。 */
+  id: string;
+  /** 预先定好的点数，按顺序使用；用完之后（或者本来就是空的）随机掷。 */
+  rolls: number[];
+}
+
+/** 开房时定下来、之后不再变的内容。 */
+export interface RoomOptions {
+  /** 好友房不计分；排位赛和镜像对战计分。 */
+  kind: "private" | "ranked" | "mirror";
+  /** 可以进这个房间的玩家。null 表示知道房间号的人都可以进。 */
+  allowed: string[] | null;
+  /** 开房时各个玩家的分数。 */
+  ratings: Record<string, number>;
+  bots: BotSeat[];
+}
+
+/** 一局结束后要送出去的东西：给玩家对象的结算，和给队列的对局记录。送达之前一直保存在存储里。 */
 interface PendingSettlement {
   matchId: string;
-  results: { playerId: string; won: boolean; coins: number }[];
+  results: { playerId: string; won: boolean; coins: number; rating: number }[];
+  /** 上一个版本的代码留下的待办里没有这一项。 */
+  record?: MatchRecord;
 }
 
 /**
@@ -39,6 +72,10 @@ interface PendingSettlement {
  * 所以把各自的到期时间记在这里，定时器永远设在最早的那一个上。
  */
 interface Timers {
+  /** 开局的最后期限。过了还在等待阶段，房间作废。 */
+  start?: number;
+  /** 轮到机器人时，它什么时候出手。 */
+  bot?: number;
   /** 当前回合的截止时间。 */
   turn?: number;
   /** 下一次重试结算的时间。 */
@@ -65,14 +102,44 @@ export class Room extends DurableObject<Env> {
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
 
+  /**
+   * 开房。只有服务端（匹配对象或入口）能调用，没有开过的房间谁也连不进来。
+   * 重复调用不会重新开一次，所以调用方超时后可以放心重试。
+   */
+  async open(options: RoomOptions): Promise<void> {
+    if (await this.ctx.storage.get(CONFIG_KEY)) return;
+
+    // 机器人和录像在开房时就入座并准备好，走的是和真实玩家一样的规则。
+    let state = initialState();
+    for (const bot of options.bots) {
+      for (const type of ["join", "ready"] as const) {
+        const result = applyAction(state, { type, playerId: bot.id });
+        if (!result.ok) throw new Error(`机器人入座失败：${result.error}`);
+        state = result.state;
+      }
+    }
+
+    const timers: Timers = { start: Date.now() + (options.kind === "private" ? IDLE_MS : JOIN_MS) };
+    await this.ctx.storage.put({ [CONFIG_KEY]: options, [STATE_KEY]: state, [TIMERS_KEY]: timers });
+    await this.arm(timers);
+  }
+
   async fetch(request: Request): Promise<Response> {
     // 对象只能从入口 Worker 访问，这个请求头由入口在校验令牌之后写入。
     const playerId = request.headers.get(PLAYER_HEADER);
     if (!playerId) return new Response("缺少玩家身份", { status: 401 });
 
+    // 没有开过（或者已经清理）的房间不存在；有名单的房间只让名单上的人进。
+    const options = await this.options();
+    if (!options) return new Response("room_not_found", { status: 404 });
+    if (options.allowed && !options.allowed.includes(playerId)) {
+      return new Response("not_allowed", { status: 403 });
+    }
+
     // 新加入和重连走的是同一个操作，由规则决定允不允许。
     const before = await this.load();
-    const joined = applyAction(before, { type: "join", playerId });
+    const action: Action = { type: "join", playerId };
+    const joined = applyAction(before, action);
     if (!joined.ok) return new Response(joined.error, { status: 409 });
 
     // 同一个玩家只保留最新的一条连接，旧的被顶替。
@@ -88,7 +155,7 @@ export class Room extends DurableObject<Env> {
 
     if (joined.state !== before) {
       // 状态变了，所有人（包括新连接）都会收到广播。
-      await this.commit(before, joined.state);
+      await this.commit(before, joined.state, action);
     } else {
       // 状态没变（比如同一个玩家开了第二个窗口），只给新连接发一份完整状态。
       this.send(server, await this.snapshot(joined.state));
@@ -179,6 +246,14 @@ export class Room extends DurableObject<Env> {
       await this.destroy();
       return;
     }
+    // 该来的人没来齐，或者建了房一直没开局。
+    if (due((await this.timers()).start) && (await this.load()).phase === "waiting") {
+      await this.destroy();
+      return;
+    }
+    if (due((await this.timers()).bot)) {
+      await this.playBot();
+    }
     if (due((await this.timers()).turn)) {
       const playerId = currentPlayer(await this.load());
       if (playerId) await this.apply({ type: "timeout", playerId });
@@ -202,39 +277,92 @@ export class Room extends DurableObject<Env> {
     const before = await this.load();
     const result = applyAction(before, action);
     if (!result.ok) return result.error;
-    if (result.state !== before) await this.commit(before, result.state);
+    if (result.state !== before) await this.commit(before, result.state, action);
     return null;
+  }
+
+  /** 替当前轮到的机器人掷一次骰子。录像有预先定好的点数，按顺序取用。 */
+  private async playBot(): Promise<void> {
+    const botId = currentPlayer(await this.load());
+    if (!botId || !isServerSeat(botId)) {
+      // 已经不是机器人的回合了，把这个定时去掉。
+      const timers = await this.timers();
+      delete timers.bot;
+      await this.ctx.storage.put(TIMERS_KEY, timers);
+      return;
+    }
+    const seat = (await this.options())?.bots.find((bot) => bot.id === botId);
+    // 这个座位已经走了几步，就从录像的第几步接着取。
+    const played = (await this.log()).filter((entry) => entry.playerId === botId).length;
+    const dice = seat?.rolls[played] ?? rollDice();
+    await this.apply({ type: "roll", playerId: botId, dice });
   }
 
   /**
    * 保存新状态并广播。状态、待结算记录和定时安排在一次写入里完成，
    * 它们要么都成功，要么都不成功。
    */
-  private async commit(before: RoomState, after: RoomState): Promise<void> {
-    // 还没开局、人已经走光：房间没有存在的必要了。
-    if (after.phase === "waiting" && after.players.length === 0) {
+  private async commit(before: RoomState, after: RoomState, action: Action): Promise<void> {
+    // 还没开局、真人已经走光：房间没有存在的必要了。
+    if (after.phase === "waiting" && !after.players.some((p) => !isServerSeat(p.id))) {
       await this.destroy();
       return;
     }
 
     const timers = await this.timers();
+    const current = currentPlayer(after);
+    if (after.phase !== "waiting") delete timers.start;
     if (after.phase !== "playing") {
       delete timers.turn;
-    } else if (currentPlayer(before) !== currentPlayer(after)) {
+    } else if (currentPlayer(before) !== current) {
       // 换人了才重新计时；同一个人的回合里发生别的事（比如有人掉线）不会让他多出时间。
       timers.turn = Date.now() + TURN_MS;
     }
+    if (current && isServerSeat(current)) {
+      // 轮到机器人：过一小段时间再出手，不要瞬间完成。
+      if (currentPlayer(before) !== current || timers.bot === undefined) {
+        timers.bot = Date.now() + BOT_MIN_MS + Math.floor(Math.random() * BOT_SPREAD_MS);
+      }
+    } else {
+      delete timers.bot;
+    }
 
     const writes: Record<string, unknown> = { [STATE_KEY]: after, [TIMERS_KEY]: timers };
+
+    // 把这一步记下来。这份记录既是对局记录，也是以后镜像对战用的录像。
+    let log: LogEntry[] | null = null;
+    if (action.type === "roll" || action.type === "timeout") {
+      const entry = { playerId: action.playerId, dice: action.type === "roll" ? action.dice : 0 };
+      log = [...(await this.log()), entry];
+      writes[LOG_KEY] = log;
+    }
+
     if (before.phase === "playing" && after.phase === "finished") {
+      const options = await this.options();
+      const kind = options?.kind ?? "private";
+      const matchId = crypto.randomUUID();
+      // 中途离开和弃权的人也在名单里，他们同样打了这一局。
+      const players = [...after.players.map((p) => p.id), ...after.forfeited];
       writes[PENDING_KEY] = {
-        matchId: crypto.randomUUID(),
-        // 中途离开和弃权的人也在名单里，他们同样打了这一局。
-        results: [...after.players.map((p) => p.id), ...after.forfeited].map((playerId) => ({
-          playerId,
-          won: playerId === after.winner,
-          coins: playerId === after.winner ? WIN_COINS : 0,
-        })),
+        matchId,
+        // 机器人和录像没有玩家对象，不需要结算。
+        results: players
+          .filter((playerId) => !isServerSeat(playerId))
+          .map((playerId) => ({
+            playerId,
+            won: playerId === after.winner,
+            coins: playerId === after.winner ? WIN_COINS : 0,
+            rating: kind === "private" ? 0 : ratingDelta(playerId === after.winner),
+          })),
+        record: {
+          matchId,
+          kind,
+          winner: after.winner,
+          players,
+          ratings: options?.ratings ?? {},
+          log: log ?? (await this.log()),
+          endedAt: Date.now(),
+        },
       } satisfies PendingSettlement;
     }
     await this.ctx.storage.put(writes);
@@ -245,8 +373,8 @@ export class Room extends DurableObject<Env> {
   }
 
   /**
-   * 把待结算记录发给各个玩家对象。玩家对象按 matchId 去重，所以这里可以重复执行。
-   * 任何一步失败都保留记录，稍后由定时器重试。全部成功后安排清理房间。
+   * 把结算发给各个玩家对象，把对局记录送进队列。接收方都按 matchId 去重，所以这里可以重复执行。
+   * 任何一步失败都保留待办，稍后由定时器重试。全部成功后安排清理房间。
    */
   private async settle(): Promise<void> {
     const pending = await this.ctx.storage.get<PendingSettlement>(PENDING_KEY);
@@ -258,8 +386,11 @@ export class Room extends DurableObject<Env> {
           await this.env.PLAYER.getByName(r.playerId).applyMatchResult(pending.matchId, {
             won: r.won,
             coins: r.coins,
+            rating: r.rating,
           });
         }
+        // 对局记录送进队列。队列可能重复投递，消费者按 matchId 去重。
+        if (pending.record) await this.env.MATCH_LOG.send(pending.record);
         await this.ctx.storage.delete(PENDING_KEY);
       } catch (error) {
         console.error("结算失败，稍后重试", pending.matchId, error);
@@ -274,7 +405,7 @@ export class Room extends DurableObject<Env> {
     await this.arm(timers);
   }
 
-  /** 关闭所有连接并清空存储。之后这个对象不占任何存储空间，同名的房间可以重新开始。 */
+  /** 关闭所有连接并清空存储。之后这个对象不占任何存储空间，这个房间号也不再能连上。 */
   private async destroy(): Promise<void> {
     for (const ws of this.ctx.getWebSockets()) {
       ws.close(CloseCode.RoomClosed, "room closed");
@@ -306,6 +437,14 @@ export class Room extends DurableObject<Env> {
   /** 对象休眠后内存会清空，所以每次都从存储读取。 */
   private async load(): Promise<RoomState> {
     return (await this.ctx.storage.get<RoomState>(STATE_KEY)) ?? initialState();
+  }
+
+  private async options(): Promise<RoomOptions | undefined> {
+    return this.ctx.storage.get<RoomOptions>(CONFIG_KEY);
+  }
+
+  private async log(): Promise<LogEntry[]> {
+    return (await this.ctx.storage.get<LogEntry[]>(LOG_KEY)) ?? [];
   }
 
   private async timers(): Promise<Timers> {

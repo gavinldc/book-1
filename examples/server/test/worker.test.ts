@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { BASE, connect, get, guest, openSocket } from "./helpers";
+import { BASE, connect, get, guest, openSocket, roomId } from "./helpers";
 
 describe("HTTP 接口", () => {
   it("健康检查", async () => {
@@ -9,7 +9,7 @@ describe("HTTP 接口", () => {
   });
 
   it("房间地址必须用 WebSocket 访问", async () => {
-    const response = await exports.default.fetch(new Request(`${BASE}/room/r0/ws`));
+    const response = await exports.default.fetch(new Request(`${BASE}/room/${await roomId("r0")}/ws`));
     expect(response.status).toBe(426);
   });
 
@@ -104,7 +104,7 @@ describe("玩家数据与结算", () => {
     const response = await get("/me", session.accessToken);
     expect(await response.json()).toEqual({
       playerId: session.playerId,
-      profile: { coins: 0, wins: 0, games: 0 },
+      profile: { coins: 0, wins: 0, games: 0, rating: 1000 },
       identities: ["guest"],
     });
   });
@@ -113,10 +113,10 @@ describe("玩家数据与结算", () => {
     const player = env.PLAYER.getByName("idem");
     await player.applyMatchResult("m1", { won: true, coins: 10 });
     await player.applyMatchResult("m1", { won: true, coins: 10 });
-    expect(await player.getProfile()).toEqual({ coins: 10, wins: 1, games: 1 });
+    expect(await player.getProfile()).toEqual({ coins: 10, wins: 1, games: 1, rating: 1000 });
 
     await player.applyMatchResult("m2", { won: false, coins: 0 });
-    expect(await player.getProfile()).toEqual({ coins: 10, wins: 1, games: 2 });
+    expect(await player.getProfile()).toEqual({ coins: 10, wins: 1, games: 2, rating: 1000 });
   });
 
   it("对局结束后双方的数据都被更新", async () => {
@@ -143,8 +143,8 @@ describe("玩家数据与结算", () => {
     const winner = message.state.winner!;
     const loser = winner === a.playerId ? b.playerId : a.playerId;
 
-    await expect.poll(() => env.PLAYER.getByName(winner).getProfile()).toEqual({ coins: 10, wins: 1, games: 1 });
-    await expect.poll(() => env.PLAYER.getByName(loser).getProfile()).toEqual({ coins: 0, wins: 0, games: 1 });
+    await expect.poll(() => env.PLAYER.getByName(winner).getProfile()).toEqual({ coins: 10, wins: 1, games: 1, rating: 1000 });
+    await expect.poll(() => env.PLAYER.getByName(loser).getProfile()).toEqual({ coins: 0, wins: 0, games: 1, rating: 1000 });
 
     a.ws.close();
     b.ws.close();

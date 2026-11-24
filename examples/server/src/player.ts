@@ -4,11 +4,15 @@ export interface Profile {
   coins: number;
   wins: number;
   games: number;
+  /** 排位分数。 */
+  rating: number;
 }
 
 export interface MatchResult {
   won: boolean;
   coins: number;
+  /** 排位分数的变化。不计分的对局不传。 */
+  rating?: number;
 }
 
 /**
@@ -41,6 +45,7 @@ const MIGRATIONS: string[] = [
      linked_at INTEGER NOT NULL
    );
    ALTER TABLE profile ADD COLUMN banned INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE profile ADD COLUMN rating INTEGER NOT NULL DEFAULT 1000;`,
 ];
 
 /** 刷新凭证的有效期。每次刷新都会顺延。 */
@@ -84,9 +89,11 @@ export class Player extends DurableObject<Env> {
         Date.now(),
       );
       sql.exec(
-        "UPDATE profile SET coins = coins + ?, wins = wins + ?, games = games + 1 WHERE id = 1",
+        `UPDATE profile SET coins = coins + ?, wins = wins + ?, games = games + 1,
+           rating = MAX(0, rating + ?) WHERE id = 1`,
         result.coins,
         result.won ? 1 : 0,
+        result.rating ?? 0,
       );
     });
     return this.readProfile();
@@ -169,8 +176,13 @@ export class Player extends DurableObject<Env> {
   }
 
   private readProfile(): Profile {
-    const row = this.ctx.storage.sql.exec("SELECT coins, wins, games FROM profile WHERE id = 1").one();
-    return { coins: Number(row.coins), wins: Number(row.wins), games: Number(row.games) };
+    const row = this.ctx.storage.sql.exec("SELECT coins, wins, games, rating FROM profile WHERE id = 1").one();
+    return {
+      coins: Number(row.coins),
+      wins: Number(row.wins),
+      games: Number(row.games),
+      rating: Number(row.rating),
+    };
   }
 }
 

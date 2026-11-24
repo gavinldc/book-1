@@ -7,7 +7,7 @@
     <style>
       body { font: 15px/1.5 system-ui, sans-serif; max-width: 560px; margin: 24px auto; padding: 0 16px; }
       input, button { font: inherit; padding: 6px 10px; }
-      input { width: 110px; }
+      input { width: 260px; }
       pre { background: #f4f4f4; padding: 12px; overflow: auto; min-height: 120px; }
       .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
       #error { color: #b00020; min-height: 1.5em; }
@@ -15,10 +15,15 @@
   </head>
   <body>
     <h1>联调客户端</h1>
-    <p>只用来验证协议，书里不讲解。开两个浏览器窗口（其中一个用无痕模式，这样是两个不同的游客账号），用同一个房间号连接。</p>
+    <p>只用来验证协议，书里不讲解。开两个浏览器窗口（其中一个用无痕模式，这样是两个不同的游客账号）。可以两边都点"排位匹配"，也可以一边建好友房、把房间号贴到另一边再连接。</p>
     <div class="row">
-      <input id="room" value="demo" aria-label="房间号" />
+      <button id="match">排位匹配</button>
+      <button id="mirror">镜像对战</button>
+      <button id="create">建好友房</button>
       <span id="player">未登录</span>
+    </div>
+    <div class="row">
+      <input id="room" placeholder="房间号" aria-label="房间号" />
       <button id="connect">连接</button>
     </div>
     <div class="row">
@@ -51,12 +56,54 @@
         ws.send(JSON.stringify(message));
       }
 
-      $("connect").onclick = async () => {
-        if (ws) ws.close();
-        const session = await login().catch((error) => {
+      async function loginOrShow() {
+        return login().catch((error) => {
           $("error").textContent = error.message;
           return null;
         });
+      }
+
+      async function postJson(path, session) {
+        const response = await fetch(path, { method: "POST", headers: { Authorization: "Bearer " + session.accessToken } });
+        if (!response.ok) throw new Error(path + " 失败：" + response.status);
+        return response.json();
+      }
+
+      // 排队：连上就是入队，断开就是取消；配好后服务端发来房间号。
+      $("match").onclick = async () => {
+        const session = await loginOrShow();
+        if (!session) return;
+        const scheme = location.protocol === "https:" ? "wss" : "ws";
+        const queue = new WebSocket(`${scheme}://${location.host}/match/ws`, ["game.v1", "auth." + session.accessToken]);
+        $("state").textContent = "排队中，大约 10 秒内没有对手会安排机器人……";
+        queue.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+          if (message.type === "matched") {
+            $("room").value = message.roomId;
+            $("connect").click();
+          }
+        };
+      };
+
+      $("mirror").onclick = async () => {
+        const session = await loginOrShow();
+        if (!session) return;
+        const result = await postJson("/mirror", session);
+        $("room").value = result.roomId;
+        $("connect").click();
+      };
+
+      $("create").onclick = async () => {
+        const session = await loginOrShow();
+        if (!session) return;
+        const result = await postJson("/rooms", session);
+        $("room").value = result.roomId;
+        $("connect").click();
+      };
+
+      $("connect").onclick = async () => {
+        if (ws) ws.close();
+        const session = await loginOrShow();
         if (!session) return;
         version = 0;
         const scheme = location.protocol === "https:" ? "wss" : "ws";

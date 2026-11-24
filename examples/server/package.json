@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "types": "wrangler types",
+    "db:local": "wrangler d1 migrations apply DB --local",
     "test": "vitest run",
     "typecheck": "wrangler types && tsc -p . && tsc -p test",
     "deploy": "wrangler deploy --env=\"\"",

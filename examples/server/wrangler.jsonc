@@ -9,13 +9,32 @@
     "bindings": [
       { "name": "ROOM", "class_name": "Room" },
       { "name": "PLAYER", "class_name": "Player" },
-      { "name": "IDENTITY", "class_name": "Identity" }
+      { "name": "IDENTITY", "class_name": "Identity" },
+      { "name": "MATCHMAKER", "class_name": "Matchmaker" }
     ]
   },
   "exports": {
     "Room": { "type": "durable-object", "storage": "sqlite" },
     "Player": { "type": "durable-object", "storage": "sqlite" },
-    "Identity": { "type": "durable-object", "storage": "sqlite" }
+    "Identity": { "type": "durable-object", "storage": "sqlite" },
+    "Matchmaker": { "type": "durable-object", "storage": "sqlite" }
+  },
+
+  // 对局记录和录像。没有填 database_id：第一次发布时由 wrangler 创建并把 ID 写回这个文件。
+  "d1_databases": [{ "binding": "DB", "database_name": "game-example", "migrations_dir": "migrations" }],
+
+  // 房间把对局记录送进队列，同一个 Worker 的 queue 处理函数负责写进 D1。
+  "queues": {
+    "producers": [{ "binding": "MATCH_LOG", "queue": "match-log" }],
+    "consumers": [
+      {
+        "queue": "match-log",
+        "max_batch_size": 50,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "dead_letter_queue": "match-log-dlq"
+      }
+    ]
   },
 
   // 必须存在的密钥。本地从 .dev.vars 读取，线上用 wrangler secret put 设置，缺少时发布会失败。
@@ -39,7 +58,21 @@
         "bindings": [
           { "name": "ROOM", "class_name": "Room" },
           { "name": "PLAYER", "class_name": "Player" },
-          { "name": "IDENTITY", "class_name": "Identity" }
+          { "name": "IDENTITY", "class_name": "Identity" },
+          { "name": "MATCHMAKER", "class_name": "Matchmaker" }
+        ]
+      },
+      "d1_databases": [{ "binding": "DB", "database_name": "game-example-staging", "migrations_dir": "migrations" }],
+      "queues": {
+        "producers": [{ "binding": "MATCH_LOG", "queue": "match-log-staging" }],
+        "consumers": [
+          {
+            "queue": "match-log-staging",
+            "max_batch_size": 50,
+            "max_batch_timeout": 5,
+            "max_retries": 5,
+            "dead_letter_queue": "match-log-staging-dlq"
+          }
         ]
       },
       "secrets": { "required": ["SESSION_SECRET", "TELEGRAM_BOT_TOKEN"] },

@@ -230,6 +230,25 @@
 
 文档：[在 DO 里使用 WebSocket](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)、[DO 的 State 接口](https://developers.cloudflare.com/durable-objects/api/state/)、[DO 限额](https://developers.cloudflare.com/durable-objects/platform/limits/)、[DO 定价](https://developers.cloudflare.com/durable-objects/platform/pricing/)
 
+## 匹配、位置提示与对局记录
+
+核实日期：2026-11-24。
+
+- `newUniqueId()` 生成的 ID 首次访问时不需要做全球范围的重名检查，比按名字首次访问更快。
+- 位置提示的取值：`wnam`、`enam`、`sam`、`weur`、`eeur`、`apac`、`apac-ne`、`apac-se`、`oc`、`afr`、`me`。只在对象第一次被访问时生效，是尽力而为。
+- 提示 `sam`、`afr`、`me` 时，对象目前会创建在邻近的受支持地点（官方举例：南美会落在北美东部）。
+- 官方建议亚太一般用 `apac`，玩家明确集中在东北亚或东南亚时才用 `apac-ne`、`apac-se`。
+- 对象创建后不会迁移，官方表示未来计划支持。
+- 队列：单条消息 128 KB；消费者一批最多 100 条，批量等待最长 60 秒；消息最多重试 100 次；单个队列每秒 5,000 条；消费者单次调用最长 15 分钟；并发消费者最多 250 个。
+- 队列的消息保留时间：免费版 24 小时，不可调；付费版默认 4 天，最长 14 天。
+- 队列计费：每 64 KB 算一次操作，一条消息通常是写入、读取、删除 3 次；免费版每天 1 万次，付费版每月含 100 万次，超出每百万次 0.40 美元。每次重试多算一次读取。
+- 没有配置死信队列时，重试次数用完的消息会被丢弃。
+- D1：单库 10 GB（免费版 500 MB）；单条语句最长 100 KB；每条查询最多绑定 100 个参数；单行最大 2 MB；查询最长 30 秒；付费版每次调用最多 1,000 条查询（免费版 50）。
+- `wrangler deploy` 可以自动创建没有填资源 ID 的 KV、R2、D1、队列等资源，并把 ID 写回配置文件；自动创建的 D1 是空库，表结构要另外执行迁移。
+- 测试：`readD1Migrations()` 从 `@cloudflare/vitest-plugin` 导入，在配置文件里读取迁移；`applyD1Migrations()`、`createMessageBatch()`、`getQueueResult()`、`runDurableObjectAlarm()` 从 `cloudflare:test` 导入。
+
+文档：[数据位置](https://developers.cloudflare.com/durable-objects/reference/data-location/)、[命名空间接口](https://developers.cloudflare.com/durable-objects/api/namespace/)、[队列限额](https://developers.cloudflare.com/queues/platform/limits/)、[队列定价](https://developers.cloudflare.com/queues/platform/pricing/)、[批量与重试](https://developers.cloudflare.com/queues/configuration/batching-retries/)、[D1 限额](https://developers.cloudflare.com/d1/platform/limits/)、[配置文件](https://developers.cloudflare.com/workers/wrangler/configuration/)、[测试接口](https://developers.cloudflare.com/workers/testing/vitest-integration/test-apis/)
+
 ## 第三方：Ably
 
 核实日期：2026-11-24。这一节不是 Cloudflare 的限额，放在这里是因为 5.11 节把它作为全局广播的备选方案。

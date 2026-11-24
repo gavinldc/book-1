@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { expect } from "vitest";
-import type { ServerMessage } from "@game/shared";
+import type { QueueMessage, ServerMessage } from "@game/shared";
 
 export const BASE = "http://example.com";
 
@@ -59,10 +59,62 @@ async function hmac(key: Uint8Array, data: string): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(data)));
 }
 
-export function openSocket(room: string, token: string | null, extraHeaders: Record<string, string> = {}) {
+const ROOM_ID = /^[0-9a-f]{64}$/;
+const rooms = new Map<string, string>();
+
+/**
+ * 测试里用好记的名字指代房间。第一次用到一个名字时，通过接口建一个好友房，之后都指向它。
+ * 传入的如果已经是真正的房间号，就原样返回。
+ */
+export async function roomId(room: string): Promise<string> {
+  if (ROOM_ID.test(room)) return room;
+  let id = rooms.get(room);
+  if (!id) {
+    const response = await post("/rooms", {}, { token: (await guest()).accessToken });
+    expect(response.status).toBe(200);
+    id = ((await response.json()) as { roomId: string }).roomId;
+    rooms.set(room, id);
+  }
+  return id;
+}
+
+/** 直接拿到房间对象，用来调用管理接口和触发定时器。 */
+export async function roomStub(room: string) {
+  return env.ROOM.get(env.ROOM.idFromString(await roomId(room)));
+}
+
+export async function openSocket(room: string, token: string | null, extraHeaders: Record<string, string> = {}) {
   const headers: Record<string, string> = { Upgrade: "websocket", ...extraHeaders };
   if (token) headers["Sec-WebSocket-Protocol"] = `game.v1, auth.${token}`;
-  return exports.default.fetch(new Request(`${BASE}/room/${room}/ws`, { headers }));
+  return exports.default.fetch(new Request(`${BASE}/room/${await roomId(room)}/ws`, { headers }));
+}
+
+/** 用一个已有的账号去排队，返回连接和按顺序读取排队消息的函数。 */
+export async function enqueue(session: Session) {
+  const response = await exports.default.fetch(
+    new Request(`${BASE}/match/ws`, {
+      headers: { Upgrade: "websocket", "Sec-WebSocket-Protocol": `game.v1, auth.${session.accessToken}` },
+    }),
+  );
+  expect(response.status).toBe(101);
+  const ws = response.webSocket!;
+  const queue: QueueMessage[] = [];
+  const waiters: ((message: QueueMessage) => void)[] = [];
+  ws.addEventListener("message", (event) => {
+    const message = JSON.parse(event.data as string) as QueueMessage;
+    const waiter = waiters.shift();
+    if (waiter) waiter(message);
+    else queue.push(message);
+  });
+  ws.accept();
+  const next = () =>
+    new Promise<QueueMessage>((resolve) => {
+      const message = queue.shift();
+      if (message) resolve(message);
+      else waiters.push(resolve);
+    });
+  const closed = new Promise<number>((resolve) => ws.addEventListener("close", (event) => resolve(event.code)));
+  return { ws, next, closed };
 }
 
 /** 用一个新的游客账号连进房间，返回连接、玩家 ID 和一个按顺序读取消息的函数。 */
