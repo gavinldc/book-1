@@ -20,6 +20,7 @@ import { metric } from "./obs/metrics";
 
 const CONFIG_KEY = "config";
 const LOG_KEY = "log";
+const SEATS_KEY = "seats";
 const STATE_KEY = "state";
 const PENDING_KEY = "pending_settlement";
 const TIMERS_KEY = "timers";
@@ -333,8 +334,17 @@ export class Room extends DurableObject<Env> {
 
     // 把这一步记下来。这份记录既是对局记录，也是以后镜像对战用的录像。
     let log: LogEntry[] | null = null;
-    if (action.type === "roll" || action.type === "timeout") {
-      const entry = { playerId: action.playerId, dice: action.type === "roll" ? action.dice : 0 };
+    // 开局的那一刻记下座位顺序。重放一局时，谁先谁后要和当时一样。
+    if (before.phase === "waiting" && after.phase === "playing") {
+      writes[SEATS_KEY] = after.players.map((p) => p.id);
+    }
+    // 对局中的离开（包括被踢）也是会改变结果的一步，一样要记。
+    const left = action.type === "leave" && before.phase === "playing";
+    if (action.type === "roll" || action.type === "timeout" || left) {
+      const entry = {
+        playerId: action.playerId,
+        dice: action.type === "roll" ? action.dice : action.type === "timeout" ? 0 : -1,
+      };
       log = [...(await this.log()), entry];
       writes[LOG_KEY] = log;
     }
@@ -361,6 +371,7 @@ export class Room extends DurableObject<Env> {
           kind,
           winner: after.winner,
           players,
+          seats: await this.ctx.storage.get<string[]>(SEATS_KEY),
           ratings: options?.ratings ?? {},
           log: log ?? (await this.log()),
           endedAt: Date.now(),

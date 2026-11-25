@@ -5,7 +5,7 @@
 ## 结构
 
 - `shared/`：前后端共享的协议类型和游戏规则（纯函数）
-- `server/`：Worker 入口、鉴权（`src/auth/`）、匹配与对局记录（`src/match/`）、排行榜与好友邀请（`src/social/`）、钱包商店与支付回调（`src/economy/`）、在线配置、管理后台与定时任务（`src/ops/`）、日志、指标与付款事件的补报（`src/obs/`），以及房间、玩家、身份、匹配四种对象（Durable Object）；`migrations/` 是 D1 的表结构
+- `server/`：Worker 入口、鉴权（`src/auth/`）、匹配与对局记录（`src/match/`）、排行榜与好友邀请（`src/social/`）、钱包商店与支付回调（`src/economy/`）、在线配置、管理后台与定时任务（`src/ops/`）、日志、指标与付款事件的补报（`src/obs/`）、限流、人机验证、名录、重放与账号删除（`src/security/`），以及房间、玩家、身份、匹配四种对象（Durable Object）；`migrations/` 是 D1 的表结构
 - `client/`：仅用于联调的最小页面，书中不讲解
 - `ci/`：GitHub Actions 工作流示例
 - `AGENTS.md`：写给 AI 编程助手的约定

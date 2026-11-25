@@ -2,11 +2,15 @@ import { fail, json, readBody } from "../auth/routes";
 import type { Delta } from "../economy/catalog";
 import { totalsBetween } from "../economy/reconcile";
 import { syncCheckoutSession } from "../economy/stripe";
+import { loadRecord } from "../match/record";
 import { log } from "../obs/log";
+import { findPlayer } from "../security/directory";
+import { replayRecord } from "../security/replay";
 import { verifyAccess, type Admin } from "./access";
 import { loadConfig, loadConfigVersion, publishConfig } from "./config";
 
 const PLAYER_PATH = /^\/admin\/players\/(p_[0-9a-f]{24})(\/[a-z]+)?$/;
+const MATCH_PATH = /^\/admin\/matches\/([0-9a-f-]{36})\/verify$/;
 const MAIL_ID = /^[A-Za-z0-9_-]{4,64}$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** 一封邮件的附件最多能发多少。防的不是坏人，是手滑多打的一个零。 */
@@ -66,13 +70,22 @@ export async function handleAdmin(request: Request, env: Env, url: URL): Promise
     return json({ totals: await totalsBetween(env.DB, day, day + DAY_MS) });
   }
 
+  // ---- 对局 ----
+  // 把一局的操作日志重放一遍，看结果和记录是否一致。玩家申诉"这一局判得不对"时用。
+  const verify = MATCH_PATH.exec(pathname);
+  if (verify && request.method === "GET") {
+    const record = await loadRecord(env.DB, verify[1]!);
+    if (!record) return fail(404, "not_found");
+    return json({ matchId: record.matchId, recorded: record.winner, replay: replayRecord(record) });
+  }
+
   // ---- 单个玩家 ----
   const match = PLAYER_PATH.exec(pathname);
   if (!match) return fail(404, "not_found");
   const playerId = match[1]!;
   const action = match[2] ?? "";
+  if (!(await findPlayer(env.DB, playerId))) return fail(404, "not_found");
   const player = env.PLAYER.getByName(playerId);
-  if (!(await player.getPublic()).exists) return fail(404, "not_found");
 
   if (action === "" && request.method === "GET") {
     const [profile, account, wallet, audit, ledger, room] = await Promise.all([

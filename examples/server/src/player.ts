@@ -420,6 +420,54 @@ export class Player extends DurableObject<Env> {
     this.ctx.storage.sql.exec("UPDATE profile SET analytics_id = ? WHERE id = 1", analyticsId);
   }
 
+  // ---- 账号删除与数据导出 ----
+
+  /** 这个玩家的全部数据，给他本人看的。 */
+  exportData(now: number) {
+    const sql = this.ctx.storage.sql;
+    return {
+      playerId: this.id,
+      profile: this.readProfile(),
+      wallet: this.getWallet(),
+      // 只给出绑定了哪些平台。身份对象的名字里有凭证的哈希，不属于要导出的内容。
+      identities: Object.keys(this.getAccount().identities),
+      friends: this.listFriends(),
+      mail: this.listMail(now),
+      ledger: this.getLedger(200),
+      orders: sql
+        .exec("SELECT order_id, product_id, provider, amount, currency, status, created_at FROM purchase")
+        .toArray(),
+    };
+  }
+
+  /**
+   * 开始删除账号。这一步之后玩家再也登录不了；真正的清除由队列的消费者分几步完成，
+   * 因为要清的东西分散在别的对象和 D1 里，任何一步失败都要能重来。
+   */
+  async requestErase(now: number): Promise<void> {
+    const sql = this.ctx.storage.sql;
+    const identities = Object.values(this.getAccount().identities);
+    this.ctx.storage.transactionSync(() => {
+      sql.exec("UPDATE profile SET banned = 1 WHERE id = 1");
+      sql.exec("DELETE FROM session");
+      // 告诉每一个好友：把我从你的列表里去掉。
+      for (const row of sql.exec("SELECT player_id FROM friend").toArray()) {
+        this.emit({ type: "friend_remove", from: this.id, to: String(row.player_id), at: now });
+      }
+      sql.exec("DELETE FROM friend");
+      this.emit({ type: "erase", playerId: this.id, identities, at: now });
+    });
+    await this.flush();
+  }
+
+  /** 最后一步：清空这个对象的全部存储。之后它和一个从没用过的对象没有区别。 */
+  async finishErase(): Promise<void> {
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    // 这个对象的实例还在内存里。把空表建回来，在它被回收之前到达的调用才不会出错。
+    migrate(this.ctx.storage);
+  }
+
   // ---- 当前所在的房间 ----
 
   /**

@@ -8,3 +8,5 @@ STRIPE_SECRET_KEY="sk_test_local_dev_only"
 STRIPE_WEBHOOK_SECRET="whsec_local_dev_only"
 # Google Analytics 衡量协议的密钥，服务端补报付款事件时用。本地不上报时填任意值即可。
 GA_API_SECRET="local-dev-only-ga-secret"
+# Turnstile 的密钥。这里填的是官方提供的测试密钥，对任何令牌都返回通过。
+TURNSTILE_SECRET="1x0000000000000000000000000000000AA"

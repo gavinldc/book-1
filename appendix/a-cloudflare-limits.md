@@ -305,6 +305,22 @@
 
 文档：[Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)、[实时日志](https://developers.cloudflare.com/workers/observability/logs/real-time-logs/)、[Analytics Engine 入门](https://developers.cloudflare.com/analytics/analytics-engine/get-started/)、[Analytics Engine 限额](https://developers.cloudflare.com/analytics/analytics-engine/limits/)、[Analytics Engine 定价](https://developers.cloudflare.com/analytics/analytics-engine/pricing/)、[监控规则](https://developers.cloudflare.com/notifications/monitors/)、[可用的通知类型](https://developers.cloudflare.com/notifications/notification-available/)、[SQL 接口的数据集](https://developers.cloudflare.com/analytics/sql-api/datasets/)、[日志查询界面](https://developers.cloudflare.com/workers/observability/query-builder/)、[追踪](https://developers.cloudflare.com/workers/observability/traces/)、[Tail Worker](https://developers.cloudflare.com/workers/observability/logs/tail-workers/)、[对象的指标](https://developers.cloudflare.com/durable-objects/observability/metrics-and-analytics/)
 
+## 安全：限流规则、人机验证与数据辖区
+
+核实日期：2026-11-25。
+
+- 防火墙的限流规则：免费版 1 条，Pro 2 条，Business 5 条，企业版 100 条。免费版和 Pro 只能按来源地址计数；免费版的计数周期和拦截时长都固定为 10 秒，Pro 的计数周期最长 1 分钟、拦截最长 1 小时。
+- 限流规则的计数有几秒的延迟，不保证精确放行某个数量的请求。
+- Bot Fight Mode 免费；要为特定流量（比如自己的 API 客户端）开例外，需要 Super Bot Fight Mode。
+- Turnstile：令牌有效期 300 秒，只能使用一次，最长 2,048 个字符；必须在服务端调用 `https://challenges.cloudflare.com/turnstile/v0/siteverify` 核实；可带 `remoteip` 和 `idempotency_key`。
+- Turnstile 的测试密钥：`1x0000000000000000000000000000000AA` 对任何令牌返回通过，`2x0000000000000000000000000000000AA` 一律返回不通过。
+- 辖区目前支持 `eu` 和 `fedramp`。Durable Object 用 `namespace.jurisdiction("eu")`；同一个名字在不同辖区里是不同的对象；对象的 ID 会出于计费和调试被记录在辖区之外。
+- D1 的辖区只能在创建数据库时指定，之后不能添加或修改；同时给了辖区和位置提示时，辖区优先。R2 的存储桶同样在创建时指定。
+- 辖区只限制数据存放和对象运行的位置，Worker 仍然可以从任何地方访问这些资源。
+- D1 的时间点恢复保留 30 天（免费版 7 天）。
+
+文档：[限流规则](https://developers.cloudflare.com/waf/rate-limiting-rules/)、[Bot Fight Mode](https://developers.cloudflare.com/bots/get-started/bot-fight-mode/)、[Turnstile 服务端校验](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)、[Turnstile 测试密钥](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)、[对象的数据位置](https://developers.cloudflare.com/durable-objects/reference/data-location/)、[D1 的数据位置](https://developers.cloudflare.com/d1/configuration/data-location/)、[R2 的数据位置](https://developers.cloudflare.com/r2/reference/data-location/)
+
 ## 第三方：支付与广告平台
 
 核实日期：2026-11-24。这一节不是 Cloudflare 的限额，是第 8 章用到的外部平台的规则。

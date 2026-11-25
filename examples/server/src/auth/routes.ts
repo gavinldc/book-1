@@ -1,6 +1,8 @@
 import { randomSecret, sha256Hex } from "./crypto";
 import { verifyTelegramInitData } from "./telegram";
 import { ACCESS_TTL_SECONDS, signAccessToken, verifyAccessToken, type AccessClaims } from "./token";
+import { registerPlayer } from "../security/directory";
+import { verifyTurnstile } from "../security/turnstile";
 
 const SECRET_FORMAT = /^[A-Za-z0-9_-]{43}$/;
 const REFRESH_FORMAT = /^([A-Za-z0-9_-]{1,32})\.([A-Za-z0-9_-]{1,32})\.([A-Za-z0-9_-]{43})$/;
@@ -35,7 +37,7 @@ export async function handleAuth(request: Request, env: Env, path: string): Prom
 
   switch (path) {
     case "/auth/guest":
-      return guestLogin(env, body);
+      return guestLogin(env, body, ip);
     case "/auth/telegram":
       return telegramLogin(env, body);
     case "/auth/refresh":
@@ -49,11 +51,16 @@ export async function handleAuth(request: Request, env: Env, path: string): Prom
   }
 }
 
-async function guestLogin(env: Env, body: Record<string, unknown>): Promise<Response> {
+async function guestLogin(env: Env, body: Record<string, unknown>, ip: string): Promise<Response> {
   // 没带凭证是新设备，由服务端生成；带了凭证是老玩家回来。
   const provided = body.secret;
   if (provided !== undefined && (typeof provided !== "string" || !SECRET_FORMAT.test(provided))) {
     return fail(400, "bad_request");
+  }
+  // 创建新账号是整个系统里成本最低的"拿到一个身份"的办法，所以只在这里要求人机验证。
+  // 老玩家带着凭证回来不需要。
+  if (provided === undefined && !(await verifyTurnstile(env, body.turnstileToken, ip))) {
+    return fail(403, "verification_required");
   }
   const secret = provided ?? randomSecret();
   const identityName = `guest:${await sha256Hex(secret)}`;
@@ -130,6 +137,8 @@ async function login(env: Env, provider: string, identityName: string) {
   const refreshSecret = randomSecret();
   const opened = await player.openSession(sessionId, await sha256Hex(refreshSecret), Date.now());
   if (opened !== "ok") return null;
+  // 记进名录。每次登录都写一次，重复的会被忽略。
+  await registerPlayer(env.DB, playerId, Date.now());
   return issue(env, playerId, sessionId, refreshSecret);
 }
 

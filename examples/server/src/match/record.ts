@@ -1,6 +1,6 @@
 import { isServerSeat } from "@game/shared";
 
-/** 对局里的一步：谁掷出了几点。dice 为 0 表示这一回合超时轮空。 */
+/** 对局里的一步：谁掷出了几点。dice 为 0 表示这一回合超时轮空，-1 表示这个人离开了对局。 */
 export interface LogEntry {
   playerId: string;
   dice: number;
@@ -13,6 +13,8 @@ export interface MatchRecord {
   winner: string | null;
   /** 参加了这一局的所有人，包括中途退出的。 */
   players: string[];
+  /** 开局时的座位顺序。重放一局时要用。早期的记录里没有。 */
+  seats?: string[];
   /** 开局时各个真实玩家的分数。好友房没有。 */
   ratings: Record<string, number>;
   log: LogEntry[];
@@ -38,13 +40,15 @@ export async function saveRecords(db: D1Database, records: MatchRecord[]): Promi
     statements.push(
       db
         .prepare(
-          "INSERT OR IGNORE INTO match_record (match_id, kind, winner, players, log, ended_at) VALUES (?, ?, ?, ?, ?, ?)",
+          `INSERT OR IGNORE INTO match_record (match_id, kind, winner, players, seats, log, ended_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           record.matchId,
           record.kind,
           record.winner,
           JSON.stringify(record.players),
+          record.seats ? JSON.stringify(record.seats) : null,
           JSON.stringify(record.log),
           record.endedAt,
         ),
@@ -85,4 +89,23 @@ export async function pickReplay(
     .first<{ player_id: string; rolls: string }>();
   if (!row) return null;
   return { playerId: row.player_id, rolls: JSON.parse(row.rolls) as number[] };
+}
+
+/** 按编号取出一局的记录。 */
+export async function loadRecord(db: D1Database, matchId: string): Promise<MatchRecord | null> {
+  const row = await db
+    .prepare("SELECT * FROM match_record WHERE match_id = ?")
+    .bind(matchId)
+    .first<{ match_id: string; kind: string; winner: string | null; players: string; seats: string | null; log: string; ended_at: number }>();
+  if (!row) return null;
+  return {
+    matchId: row.match_id,
+    kind: row.kind as MatchRecord["kind"],
+    winner: row.winner,
+    players: JSON.parse(row.players) as string[],
+    seats: row.seats ? (JSON.parse(row.seats) as string[]) : undefined,
+    ratings: {},
+    log: JSON.parse(row.log) as LogEntry[],
+    endedAt: row.ended_at,
+  };
 }

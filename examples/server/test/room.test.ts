@@ -121,7 +121,7 @@ describe("回合计时", () => {
     expect(await env.PLAYER.getByName(sa.playerId).getProfile()).toMatchObject({ wins: 0, games: 1 });
 
     const stub = await roomStub("turn3");
-    expect((await stub.debugStorageKeys()).sort()).toEqual(["config", "log", "state", "timers"]);
+    expect((await stub.debugStorageKeys()).sort()).toEqual(["config", "log", "seats", "state", "timers"]);
     await advance("turn3", LINGER_MS + 1);
     expect(await stub.debugStorageKeys()).toEqual([]);
   });

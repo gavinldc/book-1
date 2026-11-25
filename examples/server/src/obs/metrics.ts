@@ -19,6 +19,8 @@ export const METRICS = {
   object_wake: { labels: ["class"], values: ["construct_ms"] },
   /** 一次定时任务。labels: 表达式、结果（ok/failed）。values: 耗时毫秒数。 */
   job_run: { labels: ["cron", "outcome"], values: ["ms"] },
+  /** 一个请求被限流挡住。labels: 哪一档。values: 1。 */
+  rate_limited: { labels: ["tier"], values: ["count"] },
   /** 一笔订单的状态变化。labels: 渠道、状态。values: 金额（最小单位）。 */
   payment: { labels: ["provider", "status"], values: ["amount"] },
 } as const;

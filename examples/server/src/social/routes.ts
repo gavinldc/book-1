@@ -1,5 +1,6 @@
 import { authenticate, fail, json, readBody } from "../auth/routes";
 import { percentileOf } from "../ops/jobs";
+import { findPlayer } from "../security/directory";
 import { RATING_BOARD, scoresOf, standingOf, topOf } from "./leaderboard";
 
 /** 玩家 ID 的格式。不符合的直接拒绝，不去碰对应的对象。 */
@@ -55,8 +56,8 @@ export async function handleSocial(request: Request, env: Env, pathname: string)
 
   switch (pathname) {
     case "/friends/request": {
-      // 先确认对方是一个真实存在的玩家，否则任何人都能让服务端为一个随便编的 ID 建对象、存数据。
-      if (target !== me && !(await env.PLAYER.getByName(target).getPublic()).exists) return fail(404, "not_found");
+      // 先在名录里确认对方是一个真实存在的玩家。查的是 D1，不会碰到那个 ID 对应的对象。
+      if (target !== me && !(await findPlayer(env.DB, target))) return fail(404, "not_found");
       return result(await player.requestFriend(target, now));
     }
     case "/friends/accept":
@@ -66,8 +67,8 @@ export async function handleSocial(request: Request, env: Env, pathname: string)
       return json({ ok: true });
     case "/invite/accept": {
       if (target === me) return fail(400, "self");
-      const inviter = await env.PLAYER.getByName(target).getPublic();
-      if (!inviter.exists) return fail(404, "not_found");
+      const inviter = await findPlayer(env.DB, target);
+      if (!inviter) return fail(404, "not_found");
       return result(await player.setInviter(target, inviter.createdAt, now));
     }
   }

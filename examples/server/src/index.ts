@@ -10,6 +10,8 @@ import { handleAdmin } from "./ops/admin";
 import { runScheduled } from "./ops/jobs";
 import { handleLiveops } from "./ops/routes";
 import { handlePlayerEvents, type PlayerEvent } from "./social/events";
+import { handleAccount } from "./security/account";
+import { enforceRateLimit } from "./security/ratelimit";
 import { handleSocial } from "./social/routes";
 
 export { Identity } from "./identity";
@@ -27,6 +29,10 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (url.pathname === "/health") {
     return Response.json({ ok: true, environment: env.ENVIRONMENT });
   }
+
+  // 所有业务接口之前先过限流。登录接口在自己的处理函数里限。
+  const limited = await enforceRateLimit(request, env, url.pathname);
+  if (limited) return limited;
 
   const analytics = await handleAnalytics(request, env, url.pathname);
   if (analytics) return analytics;
@@ -63,6 +69,9 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   const admin = await handleAdmin(request, env, url);
   if (admin) return admin;
+
+  const account = await handleAccount(request, env, url.pathname);
+  if (account) return account;
 
   const match = ROOM_WS.exec(url.pathname);
   if (match) {

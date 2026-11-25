@@ -3,6 +3,7 @@ import { verifyAdCallback } from "./admob";
 import { shopCost } from "@game/shared";
 
 import { loadConfig } from "../ops/config";
+import { findPlayer } from "../security/directory";
 import { combine, PRODUCTS, type Provider } from "./catalog";
 import { formatRef, newOrderId } from "./orders";
 import { createCheckoutSession, handleStripeWebhook, syncCheckoutSession } from "./stripe";
@@ -90,9 +91,9 @@ async function handleAdCallback(env: Env, url: URL): Promise<Response> {
   if (!PLAYER_ID.test(playerId) || transactionId === "" || transactionId.length > 128) {
     return new Response("bad request", { status: 400 });
   }
-  const player = env.PLAYER.getByName(playerId);
   // 签名只能说明这次观看是真的，不能说明这个玩家存在。
-  if (!(await player.getPublic()).exists) return new Response("unknown player", { status: 404 });
+  if (!(await findPlayer(env.DB, playerId))) return new Response("unknown player", { status: 404 });
+  const player = env.PLAYER.getByName(playerId);
   // 奖励多少由服务端决定，回调里的 reward_amount 只是广告后台里填的一个数，不使用。
   const result = await player.grantAdReward(transactionId, Date.now());
   return json({ result });

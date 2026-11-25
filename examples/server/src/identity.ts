@@ -19,6 +19,11 @@ export class Identity extends DurableObject<Env> {
     return candidate;
   }
 
+  /** 解除归属。只有当前的归属者才能解除；之后这个身份可以被重新认领。重复调用没有影响。 */
+  async release(playerId: string): Promise<void> {
+    if ((await this.ctx.storage.get<string>(PLAYER_KEY)) === playerId) await this.ctx.storage.deleteAll();
+  }
+
   async owner(): Promise<string | null> {
     return (await this.ctx.storage.get<string>(PLAYER_KEY)) ?? null;
   }

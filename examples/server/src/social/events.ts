@@ -2,6 +2,7 @@ import { savePayment } from "../economy/reconcile";
 import { log } from "../obs/log";
 import { metric } from "../obs/metrics";
 import { reportPayment } from "../obs/analytics";
+import { eraseEverywhere } from "../security/account";
 import { saveScores } from "./leaderboard";
 
 /**
@@ -16,6 +17,8 @@ export type PlayerEvent = { seq: number } & (
   | { type: "friend_remove"; from: string; to: string; at: number }
   | { type: "invited"; inviter: string; invitee: string; at: number }
   | { type: "invite_reward"; inviter: string; invitee: string; at: number }
+  /** 玩家要求删除账号。identities 是他绑定过的各个身份对象的名字。 */
+  | { type: "erase"; playerId: string; identities: string[]; at: number }
   | {
       type: "payment";
       playerId: string;
@@ -92,6 +95,9 @@ async function handleOne(event: PlayerEvent, env: Env): Promise<void> {
       metric(env, "payment", [event.provider, event.status], [event.amount]);
       // 付款和退款是服务端确认过的事实，由服务端补报给分析平台，不依赖客户端。
       await reportPayment(env, event);
+      return;
+    case "erase":
+      await eraseEverywhere(env, event.playerId, event.identities);
       return;
     case "invited":
       await env.DB.prepare("INSERT OR IGNORE INTO invite (invitee, inviter, created_at) VALUES (?, ?, ?)")
