@@ -106,7 +106,7 @@ describe("好友", () => {
   it("不能加自己，不能加不存在的玩家，不能接受没有的申请", async () => {
     const a = await guest();
     const token = { token: a.accessToken };
-    expect((await post("/friends/request", { playerId: a.playerId }, token)).status).toBe(409);
+    expect((await post("/friends/request", { playerId: a.playerId }, token)).status).toBe(400);
     expect((await post("/friends/request", { playerId: "p_" + "0".repeat(24) }, token)).status).toBe(404);
     expect((await post("/friends/request", { playerId: "someone" }, token)).status).toBe(400);
     expect((await post("/friends/accept", { playerId: (await guest()).playerId }, token)).status).toBe(404);

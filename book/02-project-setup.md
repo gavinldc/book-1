@@ -58,7 +58,9 @@ examples/
 
 ## 2.2 把项目跑起来
 
-本章在 Node.js 24 上验证。
+需要 Node.js 24。
+
+先说明一件事：仓库里的 `examples/` 是全书结束时的代码，比这一章讲的多出了登录、数据库和很多接口。想对着这一章的内容一步步看，可以切到这一章结束时的版本（`git checkout c964582`），各章对应的版本列在仓库的 README 里。下面的命令两个版本都适用，有区别的地方会标出来。
 
 ```bash
 git clone https://github.com/gavinldc/book-1.git
@@ -72,13 +74,28 @@ cd book-1/examples && npm install
 npm test
 ```
 
+用最终版本时，启动之前还要多做两步，准备本地的密钥文件和数据库（它们分别是第 4 章和第 6 章加进来的）：
+
+```bash
+cp server/.dev.vars.example server/.dev.vars
+```
+
+```bash
+npm run db:local -w server
+```
+
+然后启动：
+
 ```bash
 npm run dev
 ```
 
-`npm run dev` 启动后，终端会显示本地地址。用浏览器打开它，会看到联调页面。开两个窗口，填同一个房间号和不同的玩家 ID，各自点"连接"和"准备"，然后轮流掷骰子，先走到 20 的人获胜。
+`npm run dev` 启动后，终端会显示本地地址。用浏览器打开它，会看到联调页面。
 
-整个过程不需要 Cloudflare 账号。wrangler 在本机模拟了 Worker、房间对象和它的存储。本地的存储数据保存在 `server/.wrangler/` 目录下，删掉这个目录就回到初始状态。
+- 这一章的版本：开两个窗口，填同一个房间号和不同的玩家 ID，各自点"连接"和"准备"，然后轮流掷骰子，先走到 20 的人获胜。
+- 最终版本：页面会先自动以游客身份登录。开两个窗口，其中一个用无痕模式（这样是两个不同的账号），两边都点"排位匹配"，配到一起之后各自点"准备"再轮流掷骰子。
+
+整个过程不需要 Cloudflare 账号。wrangler 在本机模拟了 Worker、房间对象和它的存储。本地的存储数据保存在 `server/.wrangler/` 目录下，删掉这个目录就回到初始状态（最终版本里本地数据库的表也在这里，删掉之后要重新执行上面的 `db:local`）。
 
 ## 2.3 shared：规则是纯函数
 
@@ -343,7 +360,7 @@ async webSocketClose(ws: WebSocket): Promise<void> {
 }
 ```
 
-目前的处理是断线即离开，对局中只剩一人时直接判胜。真实的游戏需要断线重连和托管，这是第 5 章的内容。
+目前的处理是断线即离开，对局中只剩一人时直接判胜。真实的游戏需要断线重连和超时处理，这是第 5 章的内容。
 
 ## 2.7 本地开发
 
@@ -351,7 +368,7 @@ async webSocketClose(ws: WebSocket): Promise<void> {
 
 - 本地运行不需要登录 Cloudflare 账号。
 - 对象的存储保存在 `server/.wrangler/` 下，重启后数据还在。这个目录不应该提交。
-- 密钥（支付平台的签名密钥、第三方接口的令牌等）不要写进 `wrangler.jsonc`。本地开发时放在 `server/.dev.vars` 文件里，格式是每行一个 `名称=值`，这个文件同样不提交。线上的密钥用 `wrangler secret put` 设置。本章还没有用到密钥，第 4 章开始会用。
+- 密钥（支付平台的签名密钥、第三方接口的令牌等）不要写进 `wrangler.jsonc`。本地开发时放在 `server/.dev.vars` 文件里，格式是每行一个 `名字="值"`，这个文件同样不提交。线上的密钥用 `wrangler secret put` 设置。本章还没有用到密钥，第 4 章开始会用。
 
 不想开浏览器的话，用命令行也能验证：
 
@@ -492,7 +509,7 @@ npx wrangler rollback
 
 | 任务 | 触发条件 | 做什么 |
 |---|---|---|
-| test | 每次推送和每个合并请求 | 安装依赖、类型检查、运行两层测试 |
+| test | 推送到 main 和每个合并请求 | 安装依赖、类型检查、运行两层测试 |
 | deploy-staging | 推送到 main，且测试通过 | 发布到预发环境 |
 | deploy-production | 手动触发，且测试通过 | 发布到正式环境 |
 

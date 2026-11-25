@@ -127,7 +127,7 @@ export class Matchmaker extends DurableObject<Env> {
         metric(this.env, "match_made", [region, group.length === 1 ? "bot" : "pair"], [Date.now() - ticket.since]);
       }
     } catch (error) {
-      log.error("room_open_failed", { region, players: group.length, error });
+      log.warn("room_open_failed", { region, players: group.length, error });
       // 把人放回队列。他们的连接还在，下一次计算时会重新参与。
       for (const ticket of group) this.mark(sockets.get(ticket.playerId)!, ticket, false);
       const retryAt = Date.now() + RETRY_MS;

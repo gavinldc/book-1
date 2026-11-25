@@ -49,6 +49,28 @@ TypeScript 全栈，用 Workers + Durable Objects 搭建出海游戏后端。
 
 见 [examples/](examples/README.md)。
 
+仓库里的 `examples/` 是全书结束时的代码。书是逐章写的，每一章讲的是那一章结束时项目的样子，所以前面章节里的代码片段会比现在的简单。想对着某一章看当时的代码，切到对应的提交：
+
+| 章 | 这一章结束时的提交 |
+|---|---|
+| 2 | `c964582` |
+| 3 | `f505fdc` |
+| 4 | `a2aea60` |
+| 5 | `2475afa` |
+| 6 | `7133937` |
+| 7 | `822fa7c` |
+| 8 | `82f4528` |
+| 9 | `e54c6dd` |
+| 10 | `97ede7f` |
+| 11 | `05dc6d8` |
+| 12 | `39be237` |
+
+```bash
+git checkout 7133937
+```
+
+看完之后用 `git checkout main` 回到最新的代码。第 12 章之后还有一次通读时做的小修正，以 `main` 为准。
+
 ## 许可
 
 文字 CC BY-NC-SA 4.0，代码 MIT，详见 [LICENSE.md](LICENSE.md)。

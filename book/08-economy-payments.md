@@ -213,7 +213,7 @@ if (provider === "telegram") {
 const REF = /^(p_[0-9a-f]{24}):(o_[0-9a-f]{24})$/;
 ```
 
-下单接口还限制了一个玩家同时能有多少个没付款的订单（示例是一小时 20 个）。每下一单都要调用一次支付平台的接口，不限制的话可以被用来消耗你在支付平台那边的调用额度。
+下单接口还限制了一个玩家一小时内最多能下多少个没付款的订单（示例是 20 个）。每下一单都要调用一次支付平台的接口，不限制的话可以被用来消耗你在支付平台那边的调用额度。
 
 ### 发货
 
@@ -245,7 +245,7 @@ async fulfillOrder(orderId: string, proof: PaymentProof, now: number): Promise<F
 
 这个方法有两道防重复的保险：订单的状态不是 `pending` 就直接返回；即使状态检查因为某种缺陷失效了，流水的编号 `order:订单号` 还会再挡一次。
 
-`external_id` 记的是支付平台那边的流水号。退款时要用它，对账时要用它，客服查问题时也要用它，一定要存。
+`external_id` 记的是支付平台那边的交易编号。退款时要用它，对账时要用它，客服查问题时也要用它，一定要存。
 
 ### 收了钱但发不了货
 
@@ -352,7 +352,7 @@ if (paid) {
 }
 ```
 
-`settle` 调用上一节的 `fulfillOrder`，流水号用消息里的 `telegram_payment_charge_id`。
+`settle` 调用上一节的 `fulfillOrder`，交易编号用消息里的 `telegram_payment_charge_id`。
 
 ### 发货失败时让 Telegram 重发
 
@@ -467,7 +467,9 @@ switch (event.type) {
   case "charge.dispute.created": {
     const metadata = event.data.object.metadata as { ref?: string } | undefined;
     const ref = parseRef(metadata?.ref);
-    if (ref) await env.PLAYER.getByName(ref.playerId).refundOrder(ref.orderId, Date.now());
+    const result = ref ? await env.PLAYER.getByName(ref.playerId).refundOrder(ref.orderId, Date.now()) : null;
+    // 事件不保证按顺序到达。付款的事件还没处理到时不答复成功，原因见下文。
+    if (result === "not_paid") return new Response("order not paid yet", { status: 409 });
     break;
   }
 }
@@ -559,6 +561,8 @@ Telegram 这边，Bot API 有一个 `getStarTransactions` 方法可以列出机�
 async refundOrder(orderId: string, now: number): Promise<RefundResult> {
   const order = this.getOrder(orderId);
   if (!order) return "not_found";
+  // 退款的通知比付款的通知先到。现在没有东西可收回，让调用方稍后再来（8.6 节）。
+  if (order.status === "pending") return "not_paid";
   if (order.status !== "paid") return "duplicate";
   this.ctx.storage.transactionSync(() => {
     this.applyDelta(`refund:${orderId}`, "refund", negate(PRODUCTS[order.productId]!.grant), now, true);
@@ -597,7 +601,7 @@ expect((await post("/shop/buy", { itemId: "dice_skin", opId: "spend-0002" }, tok
 
 用哪种是运营的决定。代码要保证的是：不论选哪种，退款这件事都被记录了下来，订单的状态是 `refunded`，流水里有对应的一笔。
 
-主动退款时，顺序是先调用支付平台的退款接口（Telegram 是 `refundStarPayment`，需要付款时存下的流水号），退款成功的回调到达后再收回游戏里的东西。不要自己先收回再去退款，那样退款接口失败的话，玩家的钱和东西就都没了。
+主动退款时，顺序是先调用支付平台的退款接口（Telegram 是 `refundStarPayment`，需要付款时存下的交易编号），退款成功的回调到达后再收回游戏里的东西。不要自己先收回再去退款，那样退款接口失败的话，玩家的钱和东西就都没了。
 
 ## 8.9 广告奖励
 
@@ -651,7 +655,7 @@ export async function verifyAdCallback(url: URL, now: number): Promise<URLSearch
 - **公钥要缓存，但不能太久。** 每次回调都去取一次公钥太慢。官方的建议是缓存，但不超过 24 小时，因为公钥会定期轮换。示例缓存 1 小时。
 - **校验通过后，只使用被签名的那部分参数。** 函数返回的是从签名内容里解析出来的参数，而不是整个地址的参数。签名之后的部分是没有被保护的。
 
-公钥的缓存放在了模块级的变量里。第 2 章的约定是"不要用模块级的变量保存对象的状态"，这里并不违反：公钥是公开的、所有请求共用的、丢了可以重新取的数据。运行环境被回收之后重新拉一次即可。
+公钥的缓存放在了模块级的变量里。3.3 节的约定是不要用模块级的变量保存对象的状态，这里并不违反：公钥是公开的、所有请求共用的、丢了可以重新取的数据。运行环境被回收之后重新拉一次即可。
 
 ### 发奖
 
@@ -714,7 +718,7 @@ audit(): Audit {
 }
 ```
 
-它的用处有两个。一是在测试里：每一个涉及钱的测试，最后都可以加一句对账，确认这条路径没有绕过流水。二是在线上：客服处理"我的金币不对"的投诉时先对一次账，对得上就按流水逐笔解释，对不上就是代码有缺陷。也可以抽样对活跃玩家定期对账，把结果做成指标（第 10 章）。
+它的用处有两个。一是在测试里：每一个涉及钱的测试，最后都可以加一句对账，确认这条路径没有绕过流水。二是在线上：客服处理"我的金币不对"的投诉时先对一次账，对得上就按流水逐笔解释，对不上就是代码有缺陷。第 10 章会让玩家对象每天自己对一次账，对不上就告警。
 
 ### 流水不能无限增长
 
@@ -841,6 +845,7 @@ beforeEach(() => {
 - `server/src/economy/telegram.ts`：申请付款链接，处理 Telegram 的回调。
 - `server/src/economy/stripe.ts`：创建结账会话、主动查询、校验签名、处理回调。
 - `server/src/economy/admob.ts`：校验 AdMob 的服务端回调。
+- `server/src/economy/orders.ts`：订单号的生成，订单引用的拼装和解析。
 - `server/src/economy/reconcile.ts`：支付记录写入 D1，按渠道汇总。
 - `server/src/economy/routes.ts`：`GET /wallet`、`POST /shop/buy`、`POST /pay/orders`、`POST /pay/orders/sync`，以及三个回调地址 `/webhooks/telegram`、`/webhooks/stripe`、`/webhooks/admob`。
 - `server/migrations/0003_payments.sql`：支付记录表。
@@ -849,7 +854,7 @@ beforeEach(() => {
 
 本地运行前要再执行一次 `npm run db:local -w server`，并把 `.dev.vars.example` 里新增的三行补进自己的 `.dev.vars`。
 
-三个回调地址是不需要玩家登录的接口，各自靠密钥或签名校验来源。第 4 章的约定是"不需要登录的接口必须限流"，这三个接口的限流放在第 11 章统一做。
+三个回调地址是不需要玩家登录的接口，各自靠密钥或签名校验来源。4.10 节说过，不需要令牌就能调用的写接口必须限流。这三个接口的限流放在第 11 章统一做。
 
 ## 本章小结
 

@@ -41,14 +41,17 @@ describe("限流", () => {
     const other = await guest();
     const statuses: number[] = [];
     // 测试里的每个请求都带着不同的来源地址。
-    for (let i = 0; i < 35; i++) {
-      statuses.push((await post("/rooms", {}, { token: session.accessToken })).status);
+    // 限额是每分钟 30 次。发 65 次：即使中途恰好跨过一次计数周期的边界，也一定有一个周期超过限额。
+    let blocked: Response | null = null;
+    for (let i = 0; i < 65; i++) {
+      const response = await post("/rooms", {}, { token: session.accessToken });
+      statuses.push(response.status);
+      if (response.status === 429) blocked = response;
     }
-    expect(statuses.slice(0, 30).every((status) => status === 200)).toBe(true);
-    expect(statuses.at(-1)).toBe(429);
-
-    const blocked = await post("/rooms", {}, { token: session.accessToken });
-    expect(blocked.headers.get("Retry-After")).toBe("60");
+    expect(statuses.slice(0, 15).every((status) => status === 200)).toBe(true);
+    expect(blocked).not.toBeNull();
+    expect(blocked!.headers.get("Retry-After")).toBe("60");
+    expect(statuses.every((status) => status === 200 || status === 429)).toBe(true);
     expect((await post("/rooms", {}, { token: other.accessToken })).status).toBe(200);
   });
 
@@ -83,9 +86,10 @@ describe("限流", () => {
           body: "{}",
         }),
       );
-    let last = 0;
-    for (let i = 0; i < 125; i++) last = (await hit("203.0.113.9")).status;
-    expect(last).toBe(429);
+    // 限额是每分钟 120 次。发 250 次，理由同上。
+    const statuses = new Set<number>();
+    for (let i = 0; i < 250; i++) statuses.add((await hit("203.0.113.9")).status);
+    expect(statuses.has(429)).toBe(true);
     // 别的地址不受影响：签名不对，得到的是 400 而不是 429。
     expect((await hit("203.0.113.10")).status).toBe(400);
   });

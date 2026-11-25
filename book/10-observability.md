@@ -41,8 +41,10 @@ console.error("结算失败，稍后重试", pending.matchId, error);
 平台的日志系统对对象形式的日志有专门的支持：把一个对象交给 `console`，它的每个字段都会被提取出来并建立索引。所以示例把所有日志改成了这个形状：
 
 ```ts
-logger.error("settle_failed", { matchId: pending.matchId, error });
+logger.warn("settle_failed", { matchId: pending.matchId, error });
 ```
+
+（房间的代码里已经有一个叫 `log` 的变量，存的是对局的操作日志，所以那里引入日志函数时改名叫 `logger`。别处都直接叫 `log`。）
 
 ```ts
 function write(level: "info" | "warn" | "error", event: string, fields: LogFields): void {
@@ -70,7 +72,7 @@ function write(level: "info" | "warn" | "error", event: string, fields: LogField
 | 级别 | 含义 | 例子 |
 |---|---|---|
 | `error` | 需要有人处理 | 收了钱发不了货，余额和流水对不上，消息进了死信队列 |
-| `warn` | 出了问题，但系统会自己重试或者已经兜住 | 通知没送出去，核实某个订单失败，封禁后没踢到人 |
+| `warn` | 出了问题，但系统会自己重试或者已经兜住 | 结算失败（稍后重试），通知没送出去，核实某个订单失败，封禁后没踢到人 |
 | `info` | 正常发生的、值得留痕的事 | 定时任务跑完了 |
 
 判断标准是"半夜出现这条日志，需不需要叫醒人"。需要的才是 `error`。把预期之内的失败（玩家余额不足、签名不对的回调）打成 `error`，告警就会一直响，然后被所有人忽略。

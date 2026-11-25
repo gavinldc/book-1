@@ -92,7 +92,7 @@ function monthly({ dau, matchesPerPlayer, playersPerMatch, awakeSecondsPerMatch 
 }
 
 const short = (n) =>
-  n >= 1e8 ? `${(n / 1e8).toFixed(1)} 亿` : n >= 1e4 ? `${(n / 1e4).toFixed(0)} 万` : String(Math.round(n));
+  n >= 1e8 ? `${(n / 1e8).toFixed(1)} 亿` : n >= 1e5 ? `${(n / 1e4).toFixed(0)} 万` : n >= 1e4 ? `${(n / 1e4).toFixed(1)} 万` : String(Math.round(n));
 
 const args = Object.fromEntries(
   process.argv.slice(2).flatMap((arg, i, all) => (arg.startsWith("--") ? [[arg.slice(2), all[i + 1]]] : [])),

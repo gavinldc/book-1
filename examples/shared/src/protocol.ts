@@ -21,7 +21,7 @@ export type QueueMessage = { type: "queued" } | { type: "matched"; roomId: strin
 
 /**
  * 由服务端操作的座位：补位的机器人（bot:）和镜像对战里的录像（ghost:）。
- * 真实玩家的 ID 是服务端生成的 UUID，不会带冒号。
+ * 真实玩家的 ID 是服务端生成的（p_ 加 24 位十六进制），不会带冒号。
  */
 export function isServerSeat(playerId: string): boolean {
   return playerId.startsWith("bot:") || playerId.startsWith("ghost:");

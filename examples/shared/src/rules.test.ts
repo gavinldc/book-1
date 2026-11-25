@@ -125,6 +125,14 @@ describe("断线与重连", () => {
     expect(state.players.map((p) => p.id)).toEqual(["b"]);
   });
 
+  it("对局结束之后的断线不再改变状态", () => {
+    const finished = run([...twoReady, { type: "leave", playerId: "b" }]);
+    expect(finished.phase).toBe("finished");
+    const after = applyAction(finished, { type: "disconnect", playerId: "a" });
+    // 返回的是同一个对象：没有变化，房间就不会为它再写一次存储。
+    expect(after.ok && after.state).toBe(finished);
+  });
+
   it("对局中断线保留位置，重连后恢复", () => {
     const offline = run([
       ...twoReady,

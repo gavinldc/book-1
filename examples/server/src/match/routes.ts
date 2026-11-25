@@ -20,7 +20,7 @@ export async function handleMatch(request: Request, env: Env, pathname: string):
   // 排队：一条 WebSocket，连上就是入队。
   if (pathname === "/match/ws") {
     if (request.headers.get("Upgrade") !== "websocket") {
-      return new Response("需要 WebSocket 连接", { status: 426 });
+      return fail(426, "upgrade_required");
     }
     const playerId = await authenticateWebSocket(request, env);
     if (!playerId) return fail(401, "unauthorized");

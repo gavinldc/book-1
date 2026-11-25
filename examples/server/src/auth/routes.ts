@@ -3,6 +3,8 @@ import { verifyTelegramInitData } from "./telegram";
 import { ACCESS_TTL_SECONDS, signAccessToken, verifyAccessToken, type AccessClaims } from "./token";
 import { registerPlayer } from "../security/directory";
 import { verifyTurnstile } from "../security/turnstile";
+import { log } from "../obs/log";
+import { metric } from "../obs/metrics";
 
 const SECRET_FORMAT = /^[A-Za-z0-9_-]{43}$/;
 const REFRESH_FORMAT = /^([A-Za-z0-9_-]{1,32})\.([A-Za-z0-9_-]{1,32})\.([A-Za-z0-9_-]{43})$/;
@@ -30,7 +32,13 @@ export async function handleAuth(request: Request, env: Env, path: string): Prom
   // 登录接口不需要令牌就能调用，按来源地址限流。
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
   const { success } = await env.AUTH_LIMITER.limit({ key: ip });
-  if (!success) return fail(429, "too_many_requests");
+  if (!success) {
+    log.warn("rate_limited", { tier: "auth", key: `ip:${ip}`, path });
+    metric(env, "rate_limited", ["auth"], [1]);
+    const limited = fail(429, "too_many_requests");
+    limited.headers.set("Retry-After", "60");
+    return limited;
+  }
 
   const body = await readBody(request);
   if (!body) return fail(400, "bad_request");

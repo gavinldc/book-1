@@ -1,6 +1,6 @@
 # 附录 A　Cloudflare 各产品限额速查表
 
-> 最后核实日期：2026-11-20。数字取自官方文档，会随时间变化，做预算和容量规划前请以官方文档为准。
+> 各节分别标注了核实日期，最早 2026-11-20，最晚 2026-11-25。数字取自官方文档，会随时间变化，做预算和容量规划前请以官方文档为准。
 
 ## Workers
 
@@ -193,7 +193,7 @@
 - DO 的 SQLite 不支持 `PRAGMA user_version`，也不允许在 `exec` 中执行 `BEGIN TRANSACTION` 或 `SAVEPOINT`。
 - DO 的每个对象同一时刻只能有一个定时器。定时器保证至少执行一次，失败后从 2 秒开始指数退避，最多重试 6 次。
 - DO 按时间点恢复覆盖过去 30 天。
-- D1 的时间旅行覆盖过去 30 天（付费版）或 7 天（免费版）。
+- D1 的时间点恢复覆盖过去 30 天（付费版）或 7 天（免费版）。
 - 每个 D1 数据库是单线程的，一次处理一条查询。
 
 文档：[DO 的 SQLite 存储接口](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)、[DO 定时器](https://developers.cloudflare.com/durable-objects/api/alarms/)、[DO 使用规则](https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/)、[D1 时间旅行](https://developers.cloudflare.com/d1/reference/time-travel/)
@@ -257,7 +257,7 @@
 - D1 每条查询最多绑定 100 个参数。
 - D1 的读副本要通过会话接口（`withSession`）使用，否则所有查询都只在主库执行。
 - 缓存接口（`caches.default`）的内容不跨数据中心；官方说明部署在自定义域名上的 Worker 才有可用的缓存操作；`cache.delete` 只清除当前数据中心的内容。
-- KV 的键最短过期时间是 60 秒；写入在其他地点最长 60 秒后可见。
+- KV 的键最短过期时间是 60 秒；写入在其他地点可能要 60 秒或更久才可见。
 - 按名字访问的对象可以从 `ctx.id.name` 读到自己的名字；通过 `idFromString()` 访问、用 `newUniqueId()` 创建、或者名字超过 1,024 字节时，这个值是 `undefined`。
 - 队列的消费者可以对单条消息调用 `ack()` 或 `retry({ delaySeconds })`；对同一条消息先调用的那个生效。
 - Telegram 小程序的直达链接可以带 `startapp` 参数，它会出现在 `initData` 的 `start_param` 字段里。
@@ -329,6 +329,7 @@
 - Durable Object 在执行代码时计时长；空闲但不满足休眠条件时也计；空闲且可以休眠的不计，包括被真正休眠之前的那一小段时间。
 - 时长按分配的 128 MB 内存计，与实际占用无关。
 - 用键值接口读写 SQLite 后端的对象，按读取和写入的行数计费；每次 `setAlarm()` 计为写入一行；删除计为写入。
+- 写入涉及有索引的列时多计一行：表本身一行，索引一行（D1 的计费说明，对象的 SQLite 存储沿用 D1 的计价）。
 - 用 `setWebSocketAutoResponse()` 自动应答的消息不产生时长费用。
 - 空的 SQLite 数据库约占 12 KB 存储。
 - Durable Object 可以设支出上限，对整个账号生效。达到后新的对象请求、SQL 读写、存储增长和新的定时器被拒绝；已经打开的 WebSocket 连接上的消息不受影响；已有的存储继续计费。

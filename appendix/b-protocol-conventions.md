@@ -12,7 +12,7 @@
 { "error": "错误码" }
 ```
 
-错误码是固定的小写下划线英文，客户端按它来分支，不要去匹配给人看的文字。完整的列表见 B.6 节。
+错误码是固定的小写下划线英文，客户端按它来分支，不要去匹配给人看的文字。完整的列表见 B.6 节。有两类应答不是这个形状：WebSocket 握手被房间或匹配对象拒绝时（客户端读不到正文，只看状态码，见 B.4 节），以及给第三方平台看的回调应答（B.5 节）。
 
 **身份放在请求头里。** 需要登录的接口带 `Authorization: Bearer <访问令牌>`。访问令牌 15 分钟过期，过期后用刷新凭证换新的（第 4 章）。玩家是谁只从令牌里取，接口不接受客户端另外传入的玩家 ID。
 
@@ -29,9 +29,10 @@
 | 401 | 没有令牌，或者令牌无效、已过期 | 刷新令牌后重试一次；仍然 401 则重新登录 |
 | 403 | 有身份，但不允许 | 不要重试 |
 | 404 | 目标不存在 | 不要重试 |
+| 405 | 请求方法不对 | 是客户端的缺陷 |
 | 409 | 和当前的状态冲突 | 按错误码处理 |
 | 410 | 已过期 | 不要重试 |
-| 426 | 这个地址只接受 WebSocket | |
+| 426 | 这个地址只接受 WebSocket | 是客户端的缺陷 |
 | 429 | 太频繁 | 按应答头 `Retry-After` 等待后再试，不要立刻重试 |
 | 500 | 服务端出错 | 可以稍后重试；带着请求编号报告 |
 
@@ -173,7 +174,7 @@
 | `GET /admin/config` | | 当前的完整配置 |
 | `PUT /admin/config` | 完整的配置，`version` 必须是当前版本加一 | 发布。校验不通过时返回 400，`{ error: "invalid_config", detail }` |
 | `POST /admin/config/rollback` | `{ version }` | 把一个历史版本作为新版本重新发布 |
-| `POST /admin/mail/broadcast` | `{ id, title, body, attachment?, days? }` | 全服邮件，只发给此刻之前注册的玩家 |
+| `POST /admin/mail/broadcast` | `{ id, title, body, attachment?, days? }` | 全服邮件，只发给此刻之前注册的玩家。`days` 是有效天数，1 到 30，不填或超出范围时按 7 天 |
 | `GET /admin/payments/totals?day=YYYY-MM-DD` | | 这一天（UTC）各渠道的订单数和金额 |
 | `GET /admin/matches/:matchId/verify` | | 重放一局，返回记录的结果和重放的结果 |
 | `GET /admin/players/:playerId` | | 资料、账号、钱包、对账结果、最近 50 条流水、当前房间 |
@@ -247,6 +248,8 @@ new WebSocket(url, ["game.v1", "auth." + accessToken]);
 | `not_in_room` | 你不在这个房间里 | 重新连接 |
 | `room_full` | 房间满了 | 只在握手时出现（状态码 409） |
 
+规则里还有一个 `bad_dice`（点数不合法）。点数由服务端生成，客户端收不到这个错误码。
+
 ### 排队
 
 连上就是入队，断开就是取消。客户端不需要发任何消息（发了会被以 1003 关闭）。
@@ -295,7 +298,7 @@ HTTP 接口应答里 `error` 字段的所有取值：
 | 错误码 | 状态码 | 含义 |
 |---|---|---|
 | `bad_request` | 400 | 请求体的格式或字段不对 |
-| `self` | 400 / 409 | 目标是自己（填邀请人、加好友） |
+| `self` | 400 | 目标是自己（填邀请人、加好友） |
 | `reason_required` | 400 | 管理操作没有填原因 |
 | `invalid_config` | 400 | 配置没有通过校验，`detail` 里是原因 |
 | `unauthorized` | 401 | 没有令牌，或者令牌无效、已过期 |
@@ -304,9 +307,10 @@ HTTP 接口应答里 `error` 字段的所有取值：
 | `banned` | 403 | 账号被封禁，或者正在删除 |
 | `forbidden` | 403 | 管理接口没有合法的 Access 令牌 |
 | `verification_required` | 403 | 创建账号需要先通过人机验证 |
-| `not_found` | 404 | 目标不存在：玩家、订单、邮件、短码、好友申请 |
-| `room_not_found` | 404 | 房间号的格式不对 |
+| `not_found` | 404 | 目标不存在：玩家、订单、邮件、短码、好友申请、对局记录、配置的历史版本，或者路径本身不存在 |
+| `room_not_found` | 404 | 房间号不是本服务生成的 |
 | `method_not_allowed` | 405 | 请求方法不对 |
+| `upgrade_required` | 426 | 这个地址只接受 WebSocket 连接 |
 | `already` | 409 | 已经填过另一个邀请人 |
 | `too_late` | 409 | 注册超过 24 小时，不能再填邀请人 |
 | `invalid` | 409 | 邀请人注册得比你晚 |
@@ -367,11 +371,11 @@ HTTP 接口应答里 `error` 字段的所有取值：
 | error | `audit_mismatch` | 余额和流水对不上 |
 | error | `dead_letter` | 有消息进了死信队列 |
 | error | `job_failed`、`job_unknown` | 定时任务失败，或者没有对应的任务 |
-| error | `settle_failed` | 结算失败，会自动重试 |
-| error | `leaderboard_write_failed` | 排行榜写入失败，会自动重试 |
-| error | `room_open_failed` | 匹配成功后开房失败，会自动重试 |
 | error | `turnstile_unavailable` | 人机验证服务访问不了 |
-| warn | `rate_limited` | 一个请求被限流挡住 |
+| warn | `settle_failed` | 结算失败，会自动重试 |
+| warn | `leaderboard_write_failed` | 排行榜写入失败，会自动重试 |
+| warn | `room_open_failed` | 匹配成功后开房失败，会自动重试 |
+| warn | `rate_limited` | 一个请求被限流挡住，`tier` 是哪一档（`auth`、`sensitive`、`api`、`webhook`） |
 | warn | `outbox_flush_failed` | 通知没送出去，稍后重发 |
 | warn | `player_event_failed` | 一条玩家通知处理失败，会重新投递 |
 | warn | `order_sync_failed` | 核实某个订单失败 |

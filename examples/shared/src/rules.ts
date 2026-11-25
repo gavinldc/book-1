@@ -88,6 +88,8 @@ function reduce(state: RoomState, action: Action): Result {
     case "disconnect": {
       const player = state.players.find((p) => p.id === action.playerId);
       if (!player || !player.connected) return { ok: true, state };
+      // 对局已经结束：谁在线已经不重要了，不必为此再改一次状态、再写一次存储。
+      if (state.phase === "finished") return { ok: true, state };
       // 还没开局时，断线直接算离开，不占着位置。
       if (state.phase === "waiting") return { ok: true, state: removePlayer(state, action.playerId) };
       // 对局中保留位置，等他回来；回合超时由 timeout 处理。

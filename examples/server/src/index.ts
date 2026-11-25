@@ -76,7 +76,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   const match = ROOM_WS.exec(url.pathname);
   if (match) {
     if (request.headers.get("Upgrade") !== "websocket") {
-      return new Response("需要 WebSocket 连接", { status: 426 });
+      return fail(426, "upgrade_required");
     }
     const playerId = await authenticateWebSocket(request, env);
     if (!playerId) return fail(401, "unauthorized");
@@ -97,7 +97,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     return response;
   }
 
-  return new Response("Not Found", { status: 404 });
+  return fail(404, "not_found");
 }
 
 export default {

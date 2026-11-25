@@ -77,6 +77,8 @@ export async function handleSocial(request: Request, env: Env, pathname: string)
 
 function result(outcome: string): Response {
   if (outcome === "ok") return json({ ok: true });
+  // 目标是自己属于请求本身不对，其余的是和当前状态冲突。
+  if (outcome === "self") return fail(400, outcome);
   return fail(outcome === "not_found" ? 404 : 409, outcome);
 }
 

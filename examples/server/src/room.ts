@@ -410,7 +410,7 @@ export class Room extends DurableObject<Env> {
           metric(this.env, "match_end", [pending.record.kind], [pending.record.log.length, pending.results.length]);
         }
       } catch (error) {
-        logger.error("settle_failed", { matchId: pending.matchId, error });
+        logger.warn("settle_failed", { matchId: pending.matchId, error });
         metric(this.env, "settle", ["retry"], [1]);
         timers.settle = Date.now() + RETRY_DELAY_MS;
       }

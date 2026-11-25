@@ -59,7 +59,7 @@ export async function handlePlayerEvents(batch: MessageBatch<PlayerEvent>, env: 
       );
       for (const message of scores) message.ack();
     } catch (error) {
-      log.error("leaderboard_write_failed", { count: scores.length, error });
+      log.warn("leaderboard_write_failed", { count: scores.length, error });
       for (const message of scores) message.retry({ delaySeconds: RETRY_DELAY_SECONDS });
     }
   }
