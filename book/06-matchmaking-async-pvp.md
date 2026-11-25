@@ -1,7 +1,5 @@
 # 第 6 章　匹配与异步 PVP
 
-> 状态：初稿　｜　文档核实与实际运行日期：2026-11-24
-
 到上一章为止，两个人要打一局，得先在游戏外面约好一个房间号。这一章解决"和谁打"的问题：想玩的人怎么凑成一局，凑不齐怎么办，对方根本不在线又怎么办。顺带把第 5 章留下的两件事做完：房间号由服务端分配，对局结束后留下记录。
 
 这一章的代码在 [examples/shared/src/matchmaking.ts](../examples/shared/src/matchmaking.ts)、[examples/server/src/matchmaker.ts](../examples/server/src/matchmaker.ts)、[examples/server/src/match/](../examples/server/src/match/) 和 [examples/server/src/room.ts](../examples/server/src/room.ts)。

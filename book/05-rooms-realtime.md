@@ -1,7 +1,5 @@
 # 第 5 章　房间与实时对战
 
-> 状态：初稿　｜　文档核实与实际运行日期：2026-11-24
-
 前面几章里的房间只能应付一切顺利的情况：玩家连上、准备、轮流掷骰子、有人到终点。真实的对局不是这样的。玩家会掉线，会切到后台半天不回来，会开两个窗口，会重复发送同一个操作，也会有人故意发一些不该发的东西。这一章把房间做成能上线的样子。
 
 这一章的代码在 [examples/shared/src/rules.ts](../examples/shared/src/rules.ts)、[protocol.ts](../examples/shared/src/protocol.ts) 和 [examples/server/src/room.ts](../examples/server/src/room.ts)。

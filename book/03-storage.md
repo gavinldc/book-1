@@ -1,7 +1,5 @@
 # 第 3 章　存储选型
 
-> 状态：初稿　｜　文档核实与实际运行日期：2026-11-24
-
 Cloudflare 上能存数据的地方有好几种，选错了不会马上出问题，但会在数据量上来之后变成很难回头的债。这一章先把游戏里的数据分类，再说每一类该放在哪里，接着把 Durable Object 的模型和生命周期讲完整，然后解决两个绕不开的问题（另有一节专门讲怎么用 Hyperdrive 接上外部数据库）：一个对象内怎么保证一致，跨对象又怎么保证一致。
 
 示例项目在这一章增加了玩家对象：每个玩家一份存档，对局结束后由房间给双方结算。代码在 [examples/server/src/player.ts](../examples/server/src/player.ts) 和 [room.ts](../examples/server/src/room.ts)。

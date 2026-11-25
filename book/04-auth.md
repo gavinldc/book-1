@@ -1,7 +1,5 @@
 # 第 4 章　账号与鉴权
 
-> 状态：初稿　｜　文档核实与实际运行日期：2026-11-24
-
 到上一章为止，示例项目里的玩家 ID 是客户端在地址里随手填的，填谁就是谁。这一章把它换成真正的账号体系，回答三个问题：玩家是谁，怎么证明，换了平台怎么还是同一个人。
 
 这一章的代码在 [examples/server/src/auth/](../examples/server/src/auth/)、[identity.ts](../examples/server/src/identity.ts) 和 [player.ts](../examples/server/src/player.ts)。
