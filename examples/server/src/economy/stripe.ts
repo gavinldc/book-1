@@ -1,6 +1,7 @@
 import { json } from "../auth/routes";
 import { fromHex, hmacVerify } from "../auth/crypto";
 import type { Order } from "../player";
+import { log } from "../obs/log";
 import { PRODUCTS } from "./catalog";
 import { parseRef } from "./orders";
 
@@ -134,7 +135,7 @@ async function fulfillSession(env: Env, session: Session): Promise<string> {
     Date.now(),
   );
   if (result === "not_found" || result === "mismatch") {
-    console.error("收到付款但无法发货", { provider: "stripe", orderId: ref.orderId, result });
+    log.error("payment_unfulfillable", { provider: "stripe", playerId: ref.playerId, orderId: ref.orderId, result });
   }
   return result;
 }

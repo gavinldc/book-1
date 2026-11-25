@@ -1,4 +1,6 @@
 import { syncCheckoutSession } from "../economy/stripe";
+import { log } from "../obs/log";
+import { metric } from "../obs/metrics";
 import { RATING_BOARD } from "../social/leaderboard";
 
 /** 分数分布表里每一段的宽度。 */
@@ -70,7 +72,7 @@ export async function sweepPendingOrders(env: Env, now: number): Promise<{ check
     } catch (error) {
       // 一个订单查不了不影响其他订单，下一轮还会再查到它。
       failed++;
-      console.error("核实订单失败", row.order_id, error);
+      log.warn("order_sync_failed", { orderId: row.order_id, error });
     }
   }
   return { checked: rows.results.length, failed };
@@ -98,21 +100,30 @@ export async function cleanup(db: D1Database, now: number): Promise<Record<strin
 /** 定时触发器的入口。按触发它的表达式决定做什么。 */
 export async function runScheduled(cron: string, scheduledTime: number, env: Env): Promise<void> {
   const started = Date.now();
-  let result: unknown;
-  switch (cron) {
-    case "*/5 * * * *":
-      result = {
-        buckets: await refreshScoreBuckets(env.DB),
-        orders: await sweepPendingOrders(env, scheduledTime),
-      };
-      break;
-    case "0 19 * * *":
-      result = await cleanup(env.DB, scheduledTime);
-      break;
-    default:
-      console.error("没有对应这个表达式的定时任务", cron);
-      return;
+  try {
+    let result: unknown;
+    switch (cron) {
+      case "*/5 * * * *":
+        result = {
+          buckets: await refreshScoreBuckets(env.DB),
+          orders: await sweepPendingOrders(env, scheduledTime),
+        };
+        break;
+      case "0 19 * * *":
+        result = await cleanup(env.DB, scheduledTime);
+        break;
+      default:
+        log.error("job_unknown", { cron });
+        return;
+    }
+    const ms = Date.now() - started;
+    // 每次成功都留一条日志和一个数据点。平台的监控规则盯着这条日志：
+    // 一段时间内它出现的次数不够，说明任务不再发生了。所以事件名不能随便改。
+    log.info("job_done", { cron, ms, result });
+    metric(env, "job_run", [cron, "ok"], [ms]);
+  } catch (error) {
+    log.error("job_failed", { cron, ms: Date.now() - started, error });
+    metric(env, "job_run", [cron, "failed"], [Date.now() - started]);
+    throw error;
   }
-  // 每次执行留一条日志：做了什么、花了多久。定时任务没有人盯着，靠这个发现它悄悄坏了。
-  console.log(JSON.stringify({ job: cron, ms: Date.now() - started, result }));
 }

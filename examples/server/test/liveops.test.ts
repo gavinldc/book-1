@@ -384,6 +384,7 @@ describe("定时任务", () => {
       currency: "usd",
       status: "pending",
       externalId: "cs_abandoned",
+      analyticsId: null,
       createdAt: old,
       paidAt: 0,
       at: old,

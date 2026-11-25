@@ -26,6 +26,9 @@
   // 定时任务：每 5 分钟一次的例行检查，和每天一次的清理（UTC 时间）。
   "triggers": { "crons": ["*/5 * * * *", "0 19 * * *"] },
 
+  // 指标：匹配等待时长、结算、定时任务耗时等，写进 Analytics Engine。
+  "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "game_metrics" }],
+
   // 对局记录和录像。没有填 database_id：第一次发布时由 wrangler 创建并把 ID 写回这个文件。
   "d1_databases": [{ "binding": "DB", "database_name": "game-example", "migrations_dir": "migrations" }],
 
@@ -51,7 +54,10 @@
         "max_batch_timeout": 1,
         "max_retries": 10,
         "dead_letter_queue": "player-events-dlq"
-      }
+      },
+      // 死信队列也要有人消费：记日志、存表。否则消息只是换了个地方躺着，过期后照样丢。
+      { "queue": "match-log-dlq", "max_batch_size": 10, "max_batch_timeout": 5 },
+      { "queue": "player-events-dlq", "max_batch_size": 10, "max_batch_timeout": 5 }
     ]
   },
 
@@ -62,7 +68,8 @@
       "TELEGRAM_BOT_TOKEN",
       "TELEGRAM_WEBHOOK_SECRET",
       "STRIPE_SECRET_KEY",
-      "STRIPE_WEBHOOK_SECRET"
+      "STRIPE_WEBHOOK_SECRET",
+      "GA_API_SECRET"
     ]
   },
 
@@ -72,10 +79,12 @@
   // 联调用的最小客户端，作为静态资源一起发布。
   "assets": { "directory": "../client" },
 
-  "observability": { "enabled": true },
+  // 日志全量保留；追踪打开后，请求经过的每一次对象调用、数据库查询都会被自动记录。
+  "observability": { "enabled": true, "traces": { "enabled": true } },
 
   // ACCESS_* 是管理后台用的 Cloudflare Access 应用的信息，不是密钥。留空时管理接口全部不可用。
-  "vars": { "ENVIRONMENT": "production", "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "" },
+  // GA_MEASUREMENT_ID 是 Firebase 里网页数据流的衡量 ID（G- 开头），不是密钥。留空时服务端不补报付款事件。
+  "vars": { "ENVIRONMENT": "production", "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "", "GA_MEASUREMENT_ID": "" },
 
   "env": {
     "staging": {
@@ -109,7 +118,9 @@
             "max_batch_timeout": 1,
             "max_retries": 10,
             "dead_letter_queue": "player-events-staging-dlq"
-          }
+          },
+          { "queue": "match-log-staging-dlq", "max_batch_size": 10, "max_batch_timeout": 5 },
+          { "queue": "player-events-staging-dlq", "max_batch_size": 10, "max_batch_timeout": 5 }
         ]
       },
       "secrets": {
@@ -118,13 +129,15 @@
           "TELEGRAM_BOT_TOKEN",
           "TELEGRAM_WEBHOOK_SECRET",
           "STRIPE_SECRET_KEY",
-          "STRIPE_WEBHOOK_SECRET"
+          "STRIPE_WEBHOOK_SECRET",
+          "GA_API_SECRET"
         ]
       },
       "ratelimits": [{ "name": "AUTH_LIMITER", "namespace_id": "1002", "simple": { "limit": 20, "period": 60 } }],
       "kv_namespaces": [{ "binding": "CONFIG" }],
+      "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "game_metrics_staging" }],
       "triggers": { "crons": ["*/5 * * * *", "0 19 * * *"] },
-      "vars": { "ENVIRONMENT": "staging", "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "" }
+      "vars": { "ENVIRONMENT": "staging", "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "", "GA_MEASUREMENT_ID": "" }
     }
   }
 }

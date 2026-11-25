@@ -2,6 +2,7 @@ import { fail, json, readBody } from "../auth/routes";
 import type { Delta } from "../economy/catalog";
 import { totalsBetween } from "../economy/reconcile";
 import { syncCheckoutSession } from "../economy/stripe";
+import { log } from "../obs/log";
 import { verifyAccess, type Admin } from "./access";
 import { loadConfig, loadConfigVersion, publishConfig } from "./config";
 
@@ -99,7 +100,7 @@ export async function handleAdmin(request: Request, env: Env, url: URL): Promise
           kicked = true;
         } catch (error) {
           // 房间可能已经结束。封禁本身已经生效，踢不到不算失败。
-          console.error("封禁后踢出失败", roomId, error);
+          log.warn("ban_kick_failed", { playerId, roomId, error });
         }
       }
       await record(env, admin, "player.ban", playerId, { reason, roomId, kicked }, now);

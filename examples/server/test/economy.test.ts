@@ -418,7 +418,7 @@ describe("流水和对账", () => {
   });
 
   it("按渠道汇总一段时间内的订单，退款单独成行", async () => {
-    const base = { type: "payment", playerId: "p_x", productId: "gems_100", provider: "recon", externalId: null } as const;
+    const base = { type: "payment", playerId: "p_x", productId: "gems_100", provider: "recon", externalId: null, analyticsId: null } as const;
     const event = (orderId: string, amount: number, status: "paid" | "refunded", seq: number, paidAt: number) =>
       savePayment(env.DB, { ...base, orderId, amount, currency: "XTR", status, seq, createdAt: paidAt, paidAt, at: paidAt });
     await event("o_r1", 50, "paid", 1, 1000);

@@ -1,6 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 
 import { negate, PRODUCTS, type Delta, type Provider } from "./economy/catalog";
+import { log } from "./obs/log";
+import { metric } from "./obs/metrics";
 import type { PlayerEvent, PlayerEventDraft } from "./social/events";
 
 export interface Profile {
@@ -95,6 +97,7 @@ const MIGRATIONS: string[] = [
    );
    ALTER TABLE profile ADD COLUMN current_room TEXT;
    ALTER TABLE profile ADD COLUMN pruned_at INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE profile ADD COLUMN analytics_id TEXT;`,
 ];
 
 /** 邮箱里最多保留多少封邮件。超出时先删已经领过的、最旧的。 */
@@ -226,7 +229,10 @@ export interface Account {
 export class Player extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    // 构造函数在每次唤醒时都执行，它的耗时就是这类对象冷启动里属于我们自己的那一部分。
+    const started = Date.now();
     migrate(ctx.storage);
+    metric(env, "object_wake", ["Player"], [Date.now() - started]);
   }
 
   getProfile(): Profile {
@@ -407,6 +413,11 @@ export class Player extends DurableObject<Env> {
       sql.exec("UPDATE mail SET claimed_at = ? WHERE id = ?", now, mailId);
     });
     return outcome;
+  }
+
+  /** 记下客户端在分析平台上的标识。服务端补报付款事件时带上它，才能和客户端的事件归到同一个人。 */
+  setAnalyticsId(analyticsId: string): void {
+    this.ctx.storage.sql.exec("UPDATE profile SET analytics_id = ? WHERE id = 1", analyticsId);
   }
 
   // ---- 当前所在的房间 ----
@@ -715,6 +726,9 @@ export class Player extends DurableObject<Env> {
     // 没有办法从外面定时遍历所有玩家对象，所以每个对象在被用到时顺手清理自己：每天最多一次。
     const pruned = Number(sql.exec("SELECT pruned_at FROM profile WHERE id = 1").one().pruned_at);
     if (now - pruned > DAY_MS) {
+      // 顺便对一次账。对不上说明有代码绕过流水改了余额，这是必须有人看的错误。
+      const audit = this.audit();
+      if (!audit.ok) log.error("audit_mismatch", { playerId: this.id, ...audit });
       this.pruneLedger(now - LEDGER_RETENTION_MS);
       sql.exec("UPDATE profile SET pruned_at = ? WHERE id = 1", now);
     }
@@ -842,6 +856,7 @@ export class Player extends DurableObject<Env> {
   /** 把订单的当前状态发给 D1 里的支付记录。必须在事务里调用。 */
   private emitPayment(orderId: string, now: number): void {
     const row = this.ctx.storage.sql.exec("SELECT * FROM purchase WHERE order_id = ?", orderId).one();
+    const analytics = this.ctx.storage.sql.exec("SELECT analytics_id FROM profile WHERE id = 1").one().analytics_id;
     this.emit({
       type: "payment",
       playerId: this.id,
@@ -852,6 +867,7 @@ export class Player extends DurableObject<Env> {
       currency: String(row.currency),
       status: row.status as OrderStatus,
       externalId: row.external_id === null ? null : String(row.external_id),
+      analyticsId: analytics === null ? null : String(analytics),
       createdAt: Number(row.created_at),
       paidAt: row.paid_at === null ? 0 : Number(row.paid_at),
       at: now,
@@ -878,14 +894,19 @@ export class Player extends DurableObject<Env> {
     const sql = this.ctx.storage.sql;
     const rows = sql.exec("SELECT seq, body FROM outbox ORDER BY seq LIMIT ?", OUTBOX_BATCH).toArray();
     if (rows.length === 0) return;
+    // 最旧的一条通知已经等了多久。正常情况下接近 0，持续变大说明通知送不出去。
+    const oldest = (JSON.parse(String(rows[0]!.body)) as { at?: number }).at;
+    const lag = typeof oldest === "number" ? Math.max(0, Date.now() - oldest) : 0;
     try {
       await this.env.PLAYER_EVENTS.sendBatch(
         rows.map((row) => ({ body: { ...JSON.parse(String(row.body)), seq: Number(row.seq) } as PlayerEvent })),
       );
       sql.exec("DELETE FROM outbox WHERE seq <= ?", Number(rows[rows.length - 1]!.seq));
+      metric(this.env, "outbox_flush", ["ok"], [rows.length, lag]);
       if (rows.length === OUTBOX_BATCH) await this.flush();
     } catch (error) {
-      console.error("通知没有送出，稍后重试", error);
+      log.warn("outbox_flush_failed", { playerId: this.id, rows: rows.length, lagMs: lag, error });
+      metric(this.env, "outbox_flush", ["failed"], [rows.length, lag]);
       await this.ctx.storage.setAlarm(Date.now() + OUTBOX_RETRY_MS);
     }
   }

@@ -18,6 +18,8 @@ export default defineConfig({
             TELEGRAM_WEBHOOK_SECRET: "test-only-telegram-webhook-secret",
             STRIPE_SECRET_KEY: "sk_test_only",
             STRIPE_WEBHOOK_SECRET: "whsec_test_only",
+            GA_API_SECRET: "test-only-ga-secret",
+            GA_MEASUREMENT_ID: "G-TEST",
             // 管理后台的测试用一个假的 Access 应用。
             ACCESS_TEAM_DOMAIN: "test-team.cloudflareaccess.com",
             ACCESS_AUD: "test-aud",

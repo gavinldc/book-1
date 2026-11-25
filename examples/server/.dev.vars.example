@@ -6,3 +6,5 @@ TELEGRAM_WEBHOOK_SECRET="local-dev-only-telegram-webhook-secret"
 # Stripe 的测试密钥和回调签名密钥。本地不真的发起支付时，填任意值即可。
 STRIPE_SECRET_KEY="sk_test_local_dev_only"
 STRIPE_WEBHOOK_SECRET="whsec_local_dev_only"
+# Google Analytics 衡量协议的密钥，服务端补报付款事件时用。本地不上报时填任意值即可。
+GA_API_SECRET="local-dev-only-ga-secret"

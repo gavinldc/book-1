@@ -280,6 +280,31 @@
 
 文档：[KV 的工作方式](https://developers.cloudflare.com/kv/concepts/how-kv-works/)、[KV 限额](https://developers.cloudflare.com/kv/platform/limits/)、[KV 定价](https://developers.cloudflare.com/kv/platform/pricing/)、[定时触发器](https://developers.cloudflare.com/workers/configuration/cron-triggers/)、[Workers 限额](https://developers.cloudflare.com/workers/platform/limits/)、[校验 Access 令牌](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
 
+## 日志、指标与追踪
+
+核实日期：2026-11-25。
+
+- Workers Logs：保留 7 天（免费版 3 天）；单条日志最大 256 KB；每个账号每天 50 亿条，超出后当天剩余时间按 1% 采样。
+- Workers Logs 计费：付费版每月含 2,000 万条，超出每百万条 0.60 美元；免费版每天 20 万条。官方注明自 2026 年 12 月 1 日起改用统一的可观测计价，届时需重新核对。
+- `head_sampling_rate` 取 0 到 1，按请求采样；被采样掉的日志不会触发基于日志的告警。
+- 日志推荐用对象（JSON）形式输出，字段会被自动提取并建立索引。
+- 监控规则（Monitors）：定期执行一条 SQL 查询并判断结果，有阈值、异常检测、SLO 三种方式；阈值支持 `<`、`>`、`<=`、`>=`、`==`、`!=`。
+- 监控规则可查的数据集包括 Workers 日志（`logs.workersLogs`）、Analytics Engine（`events.analyticsEngine.<数据集名>`）和平台自己的数据集；可用的数据集取决于套餐和权限。
+- 监控规则最快每分钟执行一次（Log Explorer 的数据集最快 10 分钟）；重复通知的间隔 1 分钟到 168 小时，默认 1 小时；查询没有返回行时不产生信号。
+- 自定义 SQL 要返回一个名为 `value` 的数值，只读一个数据集，带账号或域名的过滤条件。
+- 通知目的地：邮件最多 20 个收件人；Webhook 所有套餐可用；PagerDuty 需要 Business 及以上。
+- 异常检测的基线窗口至少是评估窗口的 6 倍，最长 24 小时。
+- 平台现成的通知里有按用量触发的账单通知，适用于按量付费的账号，Professional 及以上套餐。
+- Analytics Engine：每次 `writeDataPoint` 最多 20 个 blob、20 个 double、1 个 index；全部 blob 合计不超过 16 KB；index 不超过 96 字节；每次 Worker 调用最多写 250 个数据点；数据保留 3 个月。
+- Analytics Engine 计费：付费版每月含 1,000 万个数据点（超出每百万 0.25 美元）和 100 万次查询（超出每百万 1.00 美元）；免费版每天 10 万个数据点、1 万次查询。
+- Analytics Engine 会自动采样，查询时要用 `_sample_interval` 加权：计数写成 `SUM(_sample_interval)`。
+- 追踪：在配置里设 `observability.traces.enabled` 打开，自动记录 `fetch`、RPC、存储等调用，不需要改代码。
+- Tail Worker 仅付费版和企业版可用，按 CPU 时间计费；只是把日志发给外部工具时，官方建议用 OpenTelemetry 导出。
+- `wrangler tail`：一个 Worker 同时最多 10 个查看者；流量大时进入采样模式。
+- Durable Object 的日志和所属 Worker 的在一起，可按对象的类查看。
+
+文档：[Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)、[实时日志](https://developers.cloudflare.com/workers/observability/logs/real-time-logs/)、[Analytics Engine 入门](https://developers.cloudflare.com/analytics/analytics-engine/get-started/)、[Analytics Engine 限额](https://developers.cloudflare.com/analytics/analytics-engine/limits/)、[Analytics Engine 定价](https://developers.cloudflare.com/analytics/analytics-engine/pricing/)、[监控规则](https://developers.cloudflare.com/notifications/monitors/)、[可用的通知类型](https://developers.cloudflare.com/notifications/notification-available/)、[SQL 接口的数据集](https://developers.cloudflare.com/analytics/sql-api/datasets/)、[日志查询界面](https://developers.cloudflare.com/workers/observability/query-builder/)、[追踪](https://developers.cloudflare.com/workers/observability/traces/)、[Tail Worker](https://developers.cloudflare.com/workers/observability/logs/tail-workers/)、[对象的指标](https://developers.cloudflare.com/durable-objects/observability/metrics-and-analytics/)
+
 ## 第三方：支付与广告平台
 
 核实日期：2026-11-24。这一节不是 Cloudflare 的限额，是第 8 章用到的外部平台的规则。
@@ -297,6 +322,19 @@
 - AdMob：服务端校验回调是 GET 请求，最后两个参数依次是 `signature` 和 `key_id`，被签名的内容是它们之前的查询串；签名是 ECDSA（SHA-256，DER 编码）；公钥地址 `https://www.gstatic.com/admob/reward/verifier-keys.json`，缓存不应超过 24 小时，公钥会定期轮换。
 
 文档：[Telegram Bot API](https://core.telegram.org/bots/api)、[Telegram Stars 支付](https://core.telegram.org/bots/payments-stars)、[Stripe 回调](https://docs.stripe.com/webhooks)、[Stripe 幂等请求](https://docs.stripe.com/api/idempotent_requests)、[Stripe 附加数据](https://docs.stripe.com/metadata)、[AdMob 服务端校验](https://developers.google.com/admob/android/ssv)
+
+## 第三方：Google Analytics 衡量协议
+
+核实日期：2026-11-25。第 10 章用它从服务端向 Firebase 的数据流补报付款事件。
+
+- 地址 `https://www.google-analytics.com/mp/collect`，必须带 `api_secret`。网页数据流用 `measurement_id` 加请求体里的 `client_id`；应用数据流用 `firebase_app_id` 加 `app_instance_id`，两者不是同一种标识。
+- 官方定位：用来补充 gtag、Tag Manager、Firebase SDK 的自动采集，不是替代。
+- 每次请求最多 25 个事件；请求体小于 130 KB；事件名和参数名不超过 40 个字符；标准媒体资源的参数值不超过 100 个字符。
+- `timestamp_micros` 可以把事件标到过去，最多 72 小时。
+- 只要收到请求就返回 2xx，内容不合法或没有被处理也不会返回错误；非 2xx 时不要重试同一个请求。接入时用校验地址（`/debug/mp/collect`）检查请求。
+- `api_secret` 是私密的，不能出现在客户端代码里。
+
+文档：[衡量协议概览](https://developers.google.com/analytics/devguides/collection/protocol/ga4)、[发送事件](https://developers.google.com/analytics/devguides/collection/protocol/ga4/sending-events)、[协议参考](https://developers.google.com/analytics/devguides/collection/protocol/ga4/reference)、[校验事件](https://developers.google.com/analytics/devguides/collection/protocol/ga4/validating-events)
 
 ## 第三方：Ably
 

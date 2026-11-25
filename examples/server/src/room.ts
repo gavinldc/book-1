@@ -15,6 +15,8 @@ import {
 
 import { PLAYER_HEADER, WS_PROTOCOL } from "./auth/websocket";
 import type { LogEntry, MatchRecord } from "./match/record";
+import { log as logger } from "./obs/log";
+import { metric } from "./obs/metrics";
 
 const CONFIG_KEY = "config";
 const LOG_KEY = "log";
@@ -392,8 +394,13 @@ export class Room extends DurableObject<Env> {
         // 对局记录送进队列。队列可能重复投递，消费者按 matchId 去重。
         if (pending.record) await this.env.MATCH_LOG.send(pending.record);
         await this.ctx.storage.delete(PENDING_KEY);
+        metric(this.env, "settle", ["ok"], [1]);
+        if (pending.record) {
+          metric(this.env, "match_end", [pending.record.kind], [pending.record.log.length, pending.results.length]);
+        }
       } catch (error) {
-        console.error("结算失败，稍后重试", pending.matchId, error);
+        logger.error("settle_failed", { matchId: pending.matchId, error });
+        metric(this.env, "settle", ["retry"], [1]);
         timers.settle = Date.now() + RETRY_DELAY_MS;
       }
     }

@@ -1,6 +1,7 @@
 import { json } from "../auth/routes";
 import { safeEqual } from "../auth/crypto";
 import type { Order } from "../player";
+import { log } from "../obs/log";
 import { PRODUCTS } from "./catalog";
 import { parseRef, type OrderRef } from "./orders";
 
@@ -110,6 +111,6 @@ async function settle(env: Env, ref: OrderRef, paid: PaymentInfo, now: number): 
   );
   if (result === "not_found" || result === "mismatch") {
     // 钱已经收了，货却发不出去。重试没有用，需要人来处理：记下来，第 10 章给它加告警。
-    console.error("收到付款但无法发货", { provider: "telegram", orderId: ref.orderId, result });
+    log.error("payment_unfulfillable", { provider: "telegram", playerId: ref.playerId, orderId: ref.orderId, result });
   }
 }

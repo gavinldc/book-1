@@ -2,6 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 import { CloseCode, planMatches, type QueueMessage, type Ticket } from "@game/shared";
 
 import { PLAYER_HEADER, WS_PROTOCOL } from "./auth/websocket";
+import { log } from "./obs/log";
+import { metric } from "./obs/metrics";
 import { DEFAULT_REGION, isRegion, RATING_HEADER, REGION_HEADER, REGIONS, type Region } from "./match/region";
 
 /** 开房失败后隔多久再试。 */
@@ -87,6 +89,7 @@ export class Matchmaker extends DurableObject<Env> {
       tickets.push(ticket);
     }
 
+    if (tickets.length > 0) metric(this.env, "queue_size", [tickets[0]!.region], [tickets.length]);
     const plan = planMatches(tickets, Date.now());
     const groups = [...plan.pairs, ...plan.solo.map((ticket) => [ticket])] as Attachment[][];
 
@@ -121,9 +124,10 @@ export class Matchmaker extends DurableObject<Env> {
         const ws = sockets.get(ticket.playerId)!;
         this.send(ws, { type: "matched", roomId: id.toString() });
         ws.close(1000, "matched");
+        metric(this.env, "match_made", [region, group.length === 1 ? "bot" : "pair"], [Date.now() - ticket.since]);
       }
     } catch (error) {
-      console.error("开房失败，稍后重试", error);
+      log.error("room_open_failed", { region, players: group.length, error });
       // 把人放回队列。他们的连接还在，下一次计算时会重新参与。
       for (const ticket of group) this.mark(sockets.get(ticket.playerId)!, ticket, false);
       const retryAt = Date.now() + RETRY_MS;

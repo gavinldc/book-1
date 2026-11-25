@@ -1,4 +1,7 @@
 import { savePayment } from "../economy/reconcile";
+import { log } from "../obs/log";
+import { metric } from "../obs/metrics";
+import { reportPayment } from "../obs/analytics";
 import { saveScores } from "./leaderboard";
 
 /**
@@ -23,6 +26,8 @@ export type PlayerEvent = { seq: number } & (
       currency: string;
       status: "pending" | "paid" | "refunded";
       externalId: string | null;
+      /** 这个玩家的客户端在分析平台上的标识。客户端没上报过时为 null。 */
+      analyticsId: string | null;
       createdAt: number;
       /** 付款成功的时间，还没付款时为 0。退款时仍然是原来那次付款的时间。 */
       paidAt: number;
@@ -51,7 +56,7 @@ export async function handlePlayerEvents(batch: MessageBatch<PlayerEvent>, env: 
       );
       for (const message of scores) message.ack();
     } catch (error) {
-      console.error("写入排行榜失败", error);
+      log.error("leaderboard_write_failed", { count: scores.length, error });
       for (const message of scores) message.retry({ delaySeconds: RETRY_DELAY_SECONDS });
     }
   }
@@ -63,7 +68,7 @@ export async function handlePlayerEvents(batch: MessageBatch<PlayerEvent>, env: 
       await handleOne(message.body, env);
       message.ack();
     } catch (error) {
-      console.error("处理玩家通知失败", message.body.type, error);
+      log.warn("player_event_failed", { type: message.body.type, attempts: message.attempts, error });
       message.retry({ delaySeconds: RETRY_DELAY_SECONDS });
     }
   }
@@ -84,6 +89,9 @@ async function handleOne(event: PlayerEvent, env: Env): Promise<void> {
       return;
     case "payment":
       await savePayment(env.DB, event);
+      metric(env, "payment", [event.provider, event.status], [event.amount]);
+      // 付款和退款是服务端确认过的事实，由服务端补报给分析平台，不依赖客户端。
+      await reportPayment(env, event);
       return;
     case "invited":
       await env.DB.prepare("INSERT OR IGNORE INTO invite (invitee, inviter, created_at) VALUES (?, ?, ?)")
