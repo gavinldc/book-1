@@ -82,8 +82,12 @@ export async function enforceRateLimit(request: Request, env: Env, pathname: str
   let key = `ip:${ip}`;
   if (rule.by === "player") {
     // 按玩家计数：换网络、换地址都绕不过去。没有合法令牌的请求退回到按地址计数。
-    const claims = await authenticate(request, env);
-    if (claims) key = `player:${claims.sub}`;
+    // WebSocket 的令牌在子协议里，不在 Authorization 请求头里，要用对应的办法取。
+    const playerId =
+      request.headers.get("Upgrade") === "websocket"
+        ? await authenticateWebSocket(request, env)
+        : ((await authenticate(request, env))?.sub ?? null);
+    if (playerId) key = `player:${playerId}`;
   }
 
   const { success } = await env[rule.limiter].limit({ key: `${tier}:${key}` });
@@ -99,6 +103,7 @@ export async function enforceRateLimit(request: Request, env: Env, pathname: str
 几点说明：
 
 - **按玩家计数比按地址计数准。** 一个玩家换了网络，计数跟着他走；一百个玩家共用一个出口地址，互不影响。没有令牌或者令牌无效的请求退回到按地址计数，它们本来也过不了后面的登录检查。
+- **取身份要按连接的类型来。** 普通请求的令牌在请求头里，WebSocket 的在子协议里（4.8 节）。这段代码的第一版只认请求头，结果排队和进房的连接全部退回到了按地址计数。这个缺陷是第 12 章压测时才发现的，12.1 节有完整的经过。
 - **被限流的请求要告诉客户端什么时候再试。** 应答里带 `Retry-After`。客户端收到 429 应该等待，而不是立刻重试；立刻重试只会让它一直被限。
 - **限流的命中要记下来。** 一条 `warn` 日志加一个指标。正常情况下这个指标接近零，它突然变大，要么是有人在攻击，要么是客户端写出了一个会疯狂重试的缺陷。两种都需要知道。
 - **回调按地址计数的用处有限。** 支付平台从很多地址发回调，攻击者也可以换地址。这一档挡的是最简单的洪水式请求；真正的保护是第 8 章的签名校验，它不依赖限流。

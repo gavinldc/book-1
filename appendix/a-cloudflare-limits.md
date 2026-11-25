@@ -321,6 +321,21 @@
 
 文档：[限流规则](https://developers.cloudflare.com/waf/rate-limiting-rules/)、[Bot Fight Mode](https://developers.cloudflare.com/bots/get-started/bot-fight-mode/)、[Turnstile 服务端校验](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)、[Turnstile 测试密钥](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)、[对象的数据位置](https://developers.cloudflare.com/durable-objects/reference/data-location/)、[D1 的数据位置](https://developers.cloudflare.com/d1/configuration/data-location/)、[R2 的数据位置](https://developers.cloudflare.com/r2/reference/data-location/)
 
+## 计费细则与支出上限
+
+核实日期：2026-11-25。第 12 章的成本模型用到这些规则。
+
+- 每个计费项超出包含额度的部分，按计费单位向上取整后计费（官方举例：超出 50 万 GB·秒按 100 万 GB·秒计）。
+- Durable Object 在执行代码时计时长；空闲但不满足休眠条件时也计；空闲且可以休眠的不计，包括被真正休眠之前的那一小段时间。
+- 时长按分配的 128 MB 内存计，与实际占用无关。
+- 用键值接口读写 SQLite 后端的对象，按读取和写入的行数计费；每次 `setAlarm()` 计为写入一行；删除计为写入。
+- 用 `setWebSocketAutoResponse()` 自动应答的消息不产生时长费用。
+- 空的 SQLite 数据库约占 12 KB 存储。
+- Durable Object 可以设支出上限，对整个账号生效。达到后新的对象请求、SQL 读写、存储增长和新的定时器被拒绝；已经打开的 WebSocket 连接上的消息不受影响；已有的存储继续计费。
+- 支出上限期间待触发的定时器被挂起，安排时间超过七天的会被删除；用量上报和执行有延迟，上限不保证账单不超过该数额。
+
+文档：[对象的定价](https://developers.cloudflare.com/durable-objects/platform/pricing/)、[对象的支出管理](https://developers.cloudflare.com/durable-objects/platform/spend-management/)
+
 ## 第三方：支付与广告平台
 
 核实日期：2026-11-24。这一节不是 Cloudflare 的限额，是第 8 章用到的外部平台的规则。

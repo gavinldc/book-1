@@ -1,4 +1,5 @@
 import { authenticate, fail } from "../auth/routes";
+import { authenticateWebSocket } from "../auth/websocket";
 import { log } from "../obs/log";
 import { metric } from "../obs/metrics";
 
@@ -51,8 +52,12 @@ export async function enforceRateLimit(request: Request, env: Env, pathname: str
   let key = `ip:${ip}`;
   if (rule.by === "player") {
     // 按玩家计数：换网络、换地址都绕不过去。没有合法令牌的请求退回到按地址计数。
-    const claims = await authenticate(request, env);
-    if (claims) key = `player:${claims.sub}`;
+    // WebSocket 的令牌在子协议里，不在 Authorization 请求头里，要用对应的办法取。
+    const playerId =
+      request.headers.get("Upgrade") === "websocket"
+        ? await authenticateWebSocket(request, env)
+        : ((await authenticate(request, env))?.sub ?? null);
+    if (playerId) key = `player:${playerId}`;
   }
 
   const { success } = await env[rule.limiter].limit({ key: `${tier}:${key}` });

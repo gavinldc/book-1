@@ -52,6 +52,28 @@ describe("限流", () => {
     expect((await post("/rooms", {}, { token: other.accessToken })).status).toBe(200);
   });
 
+  it("排队和进房的连接也按玩家计数：同一个地址上的很多玩家互不影响", async () => {
+    // 这类连接的令牌在子协议里。如果限流只认 Authorization 请求头，就会退回到按地址计数，
+    // 共用一个出口地址的玩家会互相挤占额度。这是压测时发现的。
+    const statuses: number[] = [];
+    for (let i = 0; i < 130; i++) {
+      const session = await guest();
+      const response = await exports.default.fetch(
+        new Request(`${BASE}/match/ws`, {
+          headers: {
+            Upgrade: "websocket",
+            "CF-Connecting-IP": "203.0.113.50",
+            "Sec-WebSocket-Protocol": `game.v1, auth.${session.accessToken}`,
+          },
+        }),
+      );
+      statuses.push(response.status);
+      response.webSocket?.accept();
+      response.webSocket?.close();
+    }
+    expect(statuses.filter((status) => status === 429)).toEqual([]);
+  }, 30_000);
+
   it("回调地址按来源地址计数", async () => {
     const hit = (ip: string) =>
       exports.default.fetch(
