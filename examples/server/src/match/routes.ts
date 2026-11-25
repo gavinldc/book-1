@@ -3,6 +3,18 @@ import { authenticateWebSocket, PLAYER_HEADER } from "../auth/websocket";
 import { pickReplay } from "./record";
 import { RATING_HEADER, REGION_HEADER, REGIONS, regionOf } from "./region";
 
+/** 短码用的字符：去掉了容易看错的 0、O、1、I、L。 */
+const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const ROOM_CODE = /^[A-HJKMNP-Z2-9]{6}$/;
+/** 短码的有效期。比好友房的开局期限（10 分钟）稍长。 */
+const ROOM_CODE_TTL_SECONDS = 15 * 60;
+
+function newRoomCode(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  // 字母表正好 31 个字符，取模会有一点点偏差，对一个短期有效的房间码没有影响。
+  return Array.from(bytes, (byte) => ROOM_CODE_ALPHABET[byte % ROOM_CODE_ALPHABET.length]).join("");
+}
+
 /** 匹配、开房相关的接口。不归这里管的路径返回 null。 */
 export async function handleMatch(request: Request, env: Env, pathname: string): Promise<Response | null> {
   // 排队：一条 WebSocket，连上就是入队。
@@ -34,7 +46,20 @@ export async function handleMatch(request: Request, env: Env, pathname: string):
     if (!claims) return fail(401, "unauthorized");
     const id = env.ROOM.newUniqueId();
     await env.ROOM.get(id).open({ kind: "private", allowed: null, ratings: {}, bots: [] });
-    return json({ roomId: id.toString() });
+    // 再给一个方便口头分享的短码。它只在房间等人的这段时间里有用，到期自动消失。
+    const code = newRoomCode();
+    await env.CONFIG.put(`room-code:${code}`, id.toString(), { expirationTtl: ROOM_CODE_TTL_SECONDS });
+    return json({ roomId: id.toString(), code });
+  }
+
+  // 用短码换房间号。短码空间不大，这个接口上线前要限流，否则可以被逐个试出来。
+  if (pathname.startsWith("/rooms/code/") && request.method === "GET") {
+    const claims = await authenticate(request, env);
+    if (!claims) return fail(401, "unauthorized");
+    const code = pathname.slice("/rooms/code/".length).toUpperCase();
+    if (!ROOM_CODE.test(code)) return fail(400, "bad_request");
+    const roomId = await env.CONFIG.get(`room-code:${code}`);
+    return roomId ? json({ roomId }) : fail(404, "not_found");
   }
 
   // 镜像对战：对手是另一个玩家过去某一局的录像，不需要对方在线，也不需要排队。

@@ -7,10 +7,11 @@ export async function savePayment(db: D1Database, event: PaymentEvent): Promise<
   await db
     .prepare(
       `INSERT INTO payment
-         (order_id, player_id, product_id, provider, amount, currency, status, external_id, seq, paid_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (order_id, player_id, product_id, provider, amount, currency, status, external_id, seq,
+          created_at, paid_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (order_id) DO UPDATE
-         SET status = excluded.status, external_id = excluded.external_id,
+         SET status = excluded.status, external_id = excluded.external_id, paid_at = excluded.paid_at,
              seq = excluded.seq, updated_at = excluded.updated_at
          WHERE excluded.seq > payment.seq`,
     )
@@ -24,6 +25,7 @@ export async function savePayment(db: D1Database, event: PaymentEvent): Promise<
       event.status,
       event.externalId,
       event.seq,
+      event.createdAt,
       event.paidAt,
       event.at,
     )
@@ -46,7 +48,7 @@ export async function totalsBetween(db: D1Database, from: number, to: number): P
   const rows = await db
     .prepare(
       `SELECT provider, currency, status, COUNT(*) AS orders, SUM(amount) AS amount
-       FROM payment WHERE paid_at >= ? AND paid_at < ?
+       FROM payment WHERE status != 'pending' AND paid_at >= ? AND paid_at < ?
        GROUP BY provider, currency, status ORDER BY provider, currency, status`,
     )
     .bind(from, to)

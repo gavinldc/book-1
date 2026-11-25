@@ -106,6 +106,7 @@ describe("玩家数据与结算", () => {
       playerId: session.playerId,
       profile: { coins: 0, wins: 0, games: 0, rating: 1000 },
       identities: ["guest"],
+      currentRoom: null,
     });
   });
 

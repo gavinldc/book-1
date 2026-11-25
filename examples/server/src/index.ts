@@ -3,6 +3,9 @@ import { authenticateWebSocket, PLAYER_HEADER } from "./auth/websocket";
 import { saveRecords, type MatchRecord } from "./match/record";
 import { handleEconomy } from "./economy/routes";
 import { handleMatch } from "./match/routes";
+import { handleAdmin } from "./ops/admin";
+import { runScheduled } from "./ops/jobs";
+import { handleLiveops } from "./ops/routes";
 import { handlePlayerEvents, type PlayerEvent } from "./social/events";
 import { handleSocial } from "./social/routes";
 
@@ -31,8 +34,13 @@ export default {
       if (!claims) return fail(401, "unauthorized");
       // 玩家 ID 只从令牌里取，不接受客户端另外传入。
       const player = env.PLAYER.getByName(claims.sub);
-      const [profile, account] = await Promise.all([player.getProfile(), player.getAccount()]);
-      return json({ playerId: claims.sub, profile, identities: Object.keys(account.identities) });
+      const [profile, account, currentRoom] = await Promise.all([
+        player.getProfile(),
+        player.getAccount(),
+        player.getCurrentRoom(),
+      ]);
+      // currentRoom 只是提示：客户端拿它去连，连不上就当作没有进行中的对局。
+      return json({ playerId: claims.sub, profile, identities: Object.keys(account.identities), currentRoom });
     }
 
     const matched = await handleMatch(request, env, url.pathname);
@@ -43,6 +51,12 @@ export default {
 
     const economy = await handleEconomy(request, env, url);
     if (economy) return economy;
+
+    const liveops = await handleLiveops(request, env, url.pathname);
+    if (liveops) return liveops;
+
+    const admin = await handleAdmin(request, env, url);
+    if (admin) return admin;
 
     const match = ROOM_WS.exec(url.pathname);
     if (match) {
@@ -62,7 +76,10 @@ export default {
         // 不是这个命名空间生成的 ID。
         return fail(404, "room_not_found");
       }
-      return env.ROOM.get(id).fetch(new Request(request, { headers }));
+      const response = await env.ROOM.get(id).fetch(new Request(request, { headers }));
+      // 进房成功后记下"这个玩家在这个房间"，重新打开游戏和封禁时用得上。
+      if (response.status === 101) await env.PLAYER.getByName(playerId).setCurrentRoom(match[1]!);
+      return response;
     }
 
     return new Response("Not Found", { status: 404 });
@@ -81,5 +98,10 @@ export default {
     } else {
       await handlePlayerEvents(batch as MessageBatch<PlayerEvent>, env);
     }
+  },
+
+  /** 定时触发器。waitUntil 让任务在处理函数返回之后继续跑完。 */
+  scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): void {
+    ctx.waitUntil(runScheduled(controller.cron, controller.scheduledTime, env));
   },
 } satisfies ExportedHandler<Env, MatchRecord | PlayerEvent>;

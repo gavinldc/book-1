@@ -20,6 +20,12 @@
     "Matchmaker": { "type": "durable-object", "storage": "sqlite" }
   },
 
+  // 运营配置和好友房的短码。没有填 id：第一次发布时由 wrangler 创建。
+  "kv_namespaces": [{ "binding": "CONFIG" }],
+
+  // 定时任务：每 5 分钟一次的例行检查，和每天一次的清理（UTC 时间）。
+  "triggers": { "crons": ["*/5 * * * *", "0 19 * * *"] },
+
   // 对局记录和录像。没有填 database_id：第一次发布时由 wrangler 创建并把 ID 写回这个文件。
   "d1_databases": [{ "binding": "DB", "database_name": "game-example", "migrations_dir": "migrations" }],
 
@@ -68,7 +74,8 @@
 
   "observability": { "enabled": true },
 
-  "vars": { "ENVIRONMENT": "production" },
+  // ACCESS_* 是管理后台用的 Cloudflare Access 应用的信息，不是密钥。留空时管理接口全部不可用。
+  "vars": { "ENVIRONMENT": "production", "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "" },
 
   "env": {
     "staging": {
@@ -115,7 +122,9 @@
         ]
       },
       "ratelimits": [{ "name": "AUTH_LIMITER", "namespace_id": "1002", "simple": { "limit": 20, "period": 60 } }],
-      "vars": { "ENVIRONMENT": "staging" }
+      "kv_namespaces": [{ "binding": "CONFIG" }],
+      "triggers": { "crons": ["*/5 * * * *", "0 19 * * *"] },
+      "vars": { "ENVIRONMENT": "staging", "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "" }
     }
   }
 }

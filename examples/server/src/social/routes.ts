@@ -1,4 +1,5 @@
 import { authenticate, fail, json, readBody } from "../auth/routes";
+import { percentileOf } from "../ops/jobs";
 import { RATING_BOARD, scoresOf, standingOf, topOf } from "./leaderboard";
 
 /** 玩家 ID 的格式。不符合的直接拒绝，不去碰对应的对象。 */
@@ -19,9 +20,13 @@ export async function handleSocial(request: Request, env: Env, pathname: string)
 
   if (request.method === "GET") {
     switch (pathname) {
-      case "/leaderboard":
+      case "/leaderboard": {
         // 榜单走缓存，自己的名次每次现查。两部分分开，缓存才能所有人共用。
-        return json({ top: await cachedTop(env), me: await standingOf(env.DB, RATING_BOARD, me) });
+        const standing = await standingOf(env.DB, RATING_BOARD, me);
+        // 排在精确名次之外的玩家，告诉他超过了百分之多少的人。这个数来自定时重算的分布表。
+        const percent = standing && standing.rank === null ? await percentileOf(env.DB, standing.score) : null;
+        return json({ top: await cachedTop(env), me: standing && { ...standing, percent } });
+      }
       case "/leaderboard/friends": {
         const friends = (await player.listFriends()).filter((f) => f.status === "friend").map((f) => f.playerId);
         return json({ entries: await scoresOf(env.DB, RATING_BOARD, [me, ...friends]) });

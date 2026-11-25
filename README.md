@@ -35,7 +35,7 @@ TypeScript 全栈，用 Workers + Durable Objects 搭建出海游戏后端。
 
 | 章 | 标题 | 状态 |
 |---|---|---|
-| 9 | [LiveOps](book/09-liveops.md) | 未开始 |
+| 9 | [LiveOps](book/09-liveops.md) | 初稿 |
 | 10 | [埋点与可观测](book/10-observability.md) | 未开始 |
 | 11 | [安全与合规](book/11-security-compliance.md) | 未开始 |
 | 12 | [压测、账单与上线复盘](book/12-launch-retro.md) | 未开始 |

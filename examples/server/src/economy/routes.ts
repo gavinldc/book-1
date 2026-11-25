@@ -1,6 +1,9 @@
 import { authenticate, fail, json, readBody } from "../auth/routes";
 import { verifyAdCallback } from "./admob";
-import { combine, PRODUCTS, SHOP, type Provider } from "./catalog";
+import { shopCost } from "@game/shared";
+
+import { loadConfig } from "../ops/config";
+import { combine, PRODUCTS, type Provider } from "./catalog";
 import { formatRef, newOrderId } from "./orders";
 import { createCheckoutSession, handleStripeWebhook, syncCheckoutSession } from "./stripe";
 import { createInvoiceLink, handleTelegramWebhook } from "./telegram";
@@ -30,11 +33,16 @@ export async function handleEconomy(request: Request, env: Env, url: URL): Promi
   if (!body) return fail(400, "bad_request");
 
   if (pathname === "/shop/buy") {
-    const entry = typeof body.itemId === "string" ? SHOP[body.itemId] : undefined;
-    if (!entry || typeof body.opId !== "string" || !CLIENT_OP_ID.test(body.opId)) return fail(400, "bad_request");
+    if (typeof body.itemId !== "string" || typeof body.opId !== "string" || !CLIENT_OP_ID.test(body.opId)) {
+      return fail(400, "bad_request");
+    }
+    // 商品和价格来自运营配置，价格里已经算上了此刻正在进行的折扣。
+    const config = await loadConfig(env);
+    const price = shopCost(config, body.itemId, Date.now());
+    if (!price) return fail(400, "bad_request");
     // 扣钱和给东西是同一次变更，不会出现扣了钱没拿到东西。
-    const cost = { coins: -(entry.cost.coins ?? 0), gems: -(entry.cost.gems ?? 0) };
-    const result = await player.transact(`buy:${body.opId}`, "buy", combine(cost, entry.grant));
+    const cost = { coins: -price.coins, gems: -price.gems };
+    const result = await player.transact(`buy:${body.opId}`, "buy", combine(cost, config.shop[body.itemId]!.grant));
     if (result === "insufficient") return fail(409, "insufficient");
     return json({ ok: true, duplicate: result === "duplicate", wallet: await player.getWallet() });
   }

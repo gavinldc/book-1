@@ -84,7 +84,44 @@ const MIGRATIONS: string[] = [
      created_at INTEGER NOT NULL,
      paid_at INTEGER
    );`,
+  `CREATE TABLE mail (
+     id TEXT PRIMARY KEY,
+     title TEXT NOT NULL,
+     body TEXT NOT NULL,
+     attachment TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     expires_at INTEGER NOT NULL,
+     claimed_at INTEGER
+   );
+   ALTER TABLE profile ADD COLUMN current_room TEXT;
+   ALTER TABLE profile ADD COLUMN pruned_at INTEGER NOT NULL DEFAULT 0;`,
 ];
+
+/** 邮箱里最多保留多少封邮件。超出时先删已经领过的、最旧的。 */
+export const MAX_MAIL = 100;
+/** 流水保留多久。必须比任何一种重试、补单可能持续的时间都长。 */
+export const LEDGER_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+
+export interface Mail {
+  id: string;
+  title: string;
+  body: string;
+  attachment: Delta;
+  createdAt: number;
+  expiresAt: number;
+  claimed: boolean;
+}
+
+export interface LedgerRow {
+  opId: string;
+  kind: string;
+  coins: number;
+  gems: number;
+  items: string | null;
+  createdAt: number;
+}
+
+export type MailResult = TxResult | "not_found" | "expired";
 
 /** 一小时内最多能有多少个还没付款的订单。 */
 export const MAX_PENDING_ORDERS = 20;
@@ -219,7 +256,8 @@ export class Player extends DurableObject<Env> {
       const row = sql
         .exec(
           `UPDATE profile SET coins = coins + ?, wins = wins + ?, games = games + 1,
-             rating = MAX(0, rating + ?), rated_wins = rated_wins + ?
+             rating = MAX(0, rating + ?), rated_wins = rated_wins + ?,
+             current_room = NULL
            WHERE id = 1
            RETURNING rating, rated_wins, inviter, invite_rewarded`,
           result.coins,
@@ -293,10 +331,108 @@ export class Player extends DurableObject<Env> {
     return outcome;
   }
 
+  /** 最近的流水，新的在前。客服查问题时用。 */
+  getLedger(limit: number): LedgerRow[] {
+    return this.ctx.storage.sql
+      .exec("SELECT * FROM ledger ORDER BY created_at DESC LIMIT ?", Math.min(Math.max(1, limit), 200))
+      .toArray()
+      .map((row) => ({
+        opId: String(row.op_id),
+        kind: String(row.kind),
+        coins: Number(row.coins),
+        gems: Number(row.gems),
+        items: row.items === null ? null : String(row.items),
+        createdAt: Number(row.created_at),
+      }));
+  }
+
+  /** 这些操作编号里，哪些已经处理过。 */
+  hasOps(opIds: string[]): string[] {
+    const sql = this.ctx.storage.sql;
+    return opIds.filter((opId) => sql.exec("SELECT 1 FROM ledger WHERE op_id = ?", opId).toArray().length > 0);
+  }
+
+  // ---- 邮件 ----
+
+  /** 往这个玩家的邮箱里放一封邮件。id 相同的只会放一次。 */
+  sendMail(mail: { id: string; title: string; body: string; attachment: Delta; expiresAt: number }, now: number): void {
+    const sql = this.ctx.storage.sql;
+    this.ctx.storage.transactionSync(() => {
+      sql.exec(
+        `INSERT OR IGNORE INTO mail (id, title, body, attachment, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        mail.id,
+        mail.title,
+        mail.body,
+        JSON.stringify(mail.attachment),
+        now,
+        mail.expiresAt,
+      );
+      // 过期的直接删；还是太多的话，先删已经领过的，再删最旧的。
+      sql.exec("DELETE FROM mail WHERE expires_at <= ?", now);
+      sql.exec(
+        `DELETE FROM mail WHERE id NOT IN (
+           SELECT id FROM mail ORDER BY claimed_at IS NOT NULL, created_at DESC LIMIT ?
+         )`,
+        MAX_MAIL,
+      );
+    });
+  }
+
+  listMail(now: number): Mail[] {
+    return this.ctx.storage.sql
+      .exec("SELECT * FROM mail WHERE expires_at > ? ORDER BY created_at DESC", now)
+      .toArray()
+      .map((row) => ({
+        id: String(row.id),
+        title: String(row.title),
+        body: String(row.body),
+        attachment: JSON.parse(String(row.attachment)) as Delta,
+        createdAt: Number(row.created_at),
+        expiresAt: Number(row.expires_at),
+        claimed: row.claimed_at !== null,
+      }));
+  }
+
+  /** 领取一封邮件里的附件。标记已领和发放附件在同一个事务里。 */
+  claimMail(mailId: string, now: number): MailResult {
+    const sql = this.ctx.storage.sql;
+    const row = sql.exec("SELECT attachment, expires_at, claimed_at FROM mail WHERE id = ?", mailId).toArray()[0];
+    if (!row) return "not_found";
+    if (row.claimed_at !== null) return "duplicate";
+    if (Number(row.expires_at) <= now) return "expired";
+    let outcome: MailResult = "ok";
+    this.ctx.storage.transactionSync(() => {
+      outcome = this.applyDelta(`mail:${mailId}`, "mail", JSON.parse(String(row.attachment)) as Delta, now);
+      sql.exec("UPDATE mail SET claimed_at = ? WHERE id = ?", now, mailId);
+    });
+    return outcome;
+  }
+
+  // ---- 当前所在的房间 ----
+
+  /**
+   * 记下这个玩家进了哪个房间。这只是一个提示，用来在重新打开游戏时找回对局、在封禁时找到要踢的房间；
+   * 房间里到底有没有这个人，以房间自己的状态为准。
+   */
+  setCurrentRoom(roomId: string | null): void {
+    this.ctx.storage.sql.exec("UPDATE profile SET current_room = ? WHERE id = 1", roomId);
+  }
+
+  getCurrentRoom(): string | null {
+    const row = this.ctx.storage.sql.exec("SELECT current_room FROM profile WHERE id = 1").one();
+    return row.current_room === null ? null : String(row.current_room);
+  }
+
   // ---- 订单 ----
 
   /** 下单。价格由调用方按商品表填好，之后付款时要和这里记下的完全一致。 */
-  createOrder(orderId: string, productId: string, provider: Provider, now: number): Order | "unknown" | "too_many" {
+  async createOrder(
+    orderId: string,
+    productId: string,
+    provider: Provider,
+    now: number,
+  ): Promise<Order | "unknown" | "too_many"> {
     const product = PRODUCTS[productId];
     if (!product) return "unknown";
     const sql = this.ctx.storage.sql;
@@ -305,16 +441,21 @@ export class Player extends DurableObject<Env> {
       .one();
     if (Number(recent.n) >= MAX_PENDING_ORDERS) return "too_many";
     const { amount, currency } = product.price[provider];
-    sql.exec(
-      `INSERT OR IGNORE INTO purchase (order_id, product_id, provider, amount, currency, status, created_at)
-       VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
-      orderId,
-      productId,
-      provider,
-      amount,
-      currency,
-      now,
-    );
+    this.ctx.storage.transactionSync(() => {
+      sql.exec(
+        `INSERT OR IGNORE INTO purchase (order_id, product_id, provider, amount, currency, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+        orderId,
+        productId,
+        provider,
+        amount,
+        currency,
+        now,
+      );
+      // 没付款的订单也通知出去，定时任务靠 D1 里的这份记录找出需要去支付平台核实的订单。
+      this.emitPayment(orderId, now);
+    });
+    await this.flush();
     return this.getOrder(orderId)!;
   }
 
@@ -333,12 +474,16 @@ export class Player extends DurableObject<Env> {
   }
 
   /** 记下支付平台那边的编号（比如结账会话的 ID），以后主动查询付款状态时用。 */
-  setOrderExternal(orderId: string, externalId: string): void {
-    this.ctx.storage.sql.exec(
-      "UPDATE purchase SET external_id = ? WHERE order_id = ? AND status = 'pending'",
-      externalId,
-      orderId,
-    );
+  async setOrderExternal(orderId: string, externalId: string): Promise<void> {
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        "UPDATE purchase SET external_id = ? WHERE order_id = ? AND status = 'pending'",
+        externalId,
+        orderId,
+      );
+      this.emitPayment(orderId, Date.now());
+    });
+    await this.flush();
   }
 
   /**
@@ -567,6 +712,12 @@ export class Player extends DurableObject<Env> {
   openSession(sessionId: string, refreshHash: string, now: number): SessionResult {
     if (this.isBanned()) return "banned";
     const sql = this.ctx.storage.sql;
+    // 没有办法从外面定时遍历所有玩家对象，所以每个对象在被用到时顺手清理自己：每天最多一次。
+    const pruned = Number(sql.exec("SELECT pruned_at FROM profile WHERE id = 1").one().pruned_at);
+    if (now - pruned > DAY_MS) {
+      this.pruneLedger(now - LEDGER_RETENTION_MS);
+      sql.exec("UPDATE profile SET pruned_at = ? WHERE id = 1", now);
+    }
     this.ctx.storage.transactionSync(() => {
       sql.exec("DELETE FROM session WHERE expires_at <= ?", now);
       sql.exec(
@@ -627,12 +778,20 @@ export class Player extends DurableObject<Env> {
     return { banned: this.isBanned(), identities };
   }
 
-  /** 封禁并让所有会话失效。已经签发的访问令牌最长还能用到它自己过期。 */
-  ban(): void {
+  /**
+   * 封禁并让所有会话失效。已经签发的访问令牌最长还能用到它自己过期。
+   * 返回这个玩家此刻可能所在的房间，调用方据此把他从对局里移出去。
+   */
+  ban(): string | null {
     this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec("UPDATE profile SET banned = 1 WHERE id = 1");
       this.ctx.storage.sql.exec("DELETE FROM session");
     });
+    return this.getCurrentRoom();
+  }
+
+  unban(): void {
+    this.ctx.storage.sql.exec("UPDATE profile SET banned = 0 WHERE id = 1");
   }
 
   /**
@@ -691,9 +850,10 @@ export class Player extends DurableObject<Env> {
       provider: String(row.provider),
       amount: Number(row.amount),
       currency: String(row.currency),
-      status: row.status as "paid" | "refunded",
+      status: row.status as OrderStatus,
       externalId: row.external_id === null ? null : String(row.external_id),
-      paidAt: Number(row.paid_at),
+      createdAt: Number(row.created_at),
+      paidAt: row.paid_at === null ? 0 : Number(row.paid_at),
       at: now,
     });
   }

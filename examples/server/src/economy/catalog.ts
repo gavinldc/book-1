@@ -16,8 +16,8 @@ export interface Product {
 }
 
 /**
- * 商品表写在代码里，由服务端决定价格和内容。客户端只传商品的编号。
- * 第 9 章会把它挪到可以在线修改的配置里。
+ * 充值商品写在代码里，由服务端决定价格和内容。客户端只传商品的编号。
+ * 用游戏内货币买的商品在运营配置里（shared/src/liveops.ts），可以在线修改。
  */
 export const PRODUCTS: Record<string, Product> = {
   gems_100: {
@@ -32,12 +32,6 @@ export const PRODUCTS: Record<string, Product> = {
     grant: { gems: 550 },
     price: { telegram: { amount: 250, currency: "XTR" }, stripe: { amount: 499, currency: "usd" } },
   },
-};
-
-/** 用游戏内货币买的东西。cost 里的每一项都是要扣掉的数量。 */
-export const SHOP: Record<string, { cost: { coins?: number; gems?: number }; grant: Delta }> = {
-  shield: { cost: { coins: 30 }, grant: { items: { shield: 1 } } },
-  dice_skin: { cost: { gems: 80 }, grant: { items: { dice_skin: 1 } } },
 };
 
 /** 把一次变更取反，用于退款时收回发出去的东西。 */

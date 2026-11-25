@@ -21,9 +21,10 @@ export type PlayerEvent = { seq: number } & (
       provider: string;
       amount: number;
       currency: string;
-      status: "paid" | "refunded";
+      status: "pending" | "paid" | "refunded";
       externalId: string | null;
-      /** 付款成功的时间。退款时仍然是原来那次付款的时间。 */
+      createdAt: number;
+      /** 付款成功的时间，还没付款时为 0。退款时仍然是原来那次付款的时间。 */
       paidAt: number;
       at: number;
     }

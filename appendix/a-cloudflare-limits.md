@@ -264,6 +264,22 @@
 
 文档：[D1 定价](https://developers.cloudflare.com/d1/platform/pricing/)、[D1 限额](https://developers.cloudflare.com/d1/platform/limits/)、[D1 读副本](https://developers.cloudflare.com/d1/best-practices/read-replication/)、[缓存接口](https://developers.cloudflare.com/workers/runtime-apis/cache/)、[KV 写入](https://developers.cloudflare.com/kv/api/write-key-value-pairs/)、[对象 ID](https://developers.cloudflare.com/durable-objects/api/id/)、[队列的 JavaScript 接口](https://developers.cloudflare.com/queues/configuration/javascript-apis/)、[Telegram 小程序](https://core.telegram.org/bots/webapps)
 
+## 运营：KV、定时触发器与 Access
+
+核实日期：2026-11-24。
+
+- KV：写入在其他地点可能要 60 秒或更久才可见；同一个键每秒最多写 1 次；键最长 512 字节，值最大 25 MiB；每次 Worker 调用最多 1,000 次操作。
+- KV：读取的 `cacheTtl` 最小 30 秒，默认 60 秒；键的过期时间最短 60 秒。
+- KV 计费（付费版）：每月含 1,000 万次读、100 万次写，超出每百万次读 0.50 美元、写 5.00 美元；存储含 1 GB。免费版每天 10 万次读、1,000 次写。
+- 定时触发器按 UTC 执行；新增、修改、删除后最长 15 分钟才传播到全网，期间到点的调用可能被错过。
+- 定时触发器数量：免费版每个账号 5 个，付费版 1,000 个。
+- 定时任务单次调用最长 15 分钟；间隔小于 1 小时的任务 CPU 时间默认 30 秒、最多 5 分钟，间隔 1 小时及以上最多 15 分钟。
+- Access：令牌在 `Cf-Access-Jwt-Assertion` 请求头里，算法 RS256；公钥地址 `https://<团队名>.cloudflareaccess.com/cdn-cgi/access/certs`，要按令牌的 `kid` 匹配。
+- Access：签名密钥默认每 6 周轮换，旧密钥在轮换后 7 天内仍然有效；除签名外还要核对 `iss`、`aud`、`exp`、`nbf`。
+- 测试：`createScheduledController()`、`createExecutionContext()`、`waitOnExecutionContext()` 从 `cloudflare:test` 导入。
+
+文档：[KV 的工作方式](https://developers.cloudflare.com/kv/concepts/how-kv-works/)、[KV 限额](https://developers.cloudflare.com/kv/platform/limits/)、[KV 定价](https://developers.cloudflare.com/kv/platform/pricing/)、[定时触发器](https://developers.cloudflare.com/workers/configuration/cron-triggers/)、[Workers 限额](https://developers.cloudflare.com/workers/platform/limits/)、[校验 Access 令牌](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
+
 ## 第三方：支付与广告平台
 
 核实日期：2026-11-24。这一节不是 Cloudflare 的限额，是第 8 章用到的外部平台的规则。
